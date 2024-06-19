@@ -2,21 +2,22 @@
 #include<fstream>
 #include<vector>
 #include<unsupported/Eigen/MatrixFunctions>
-#include<unsupported/Eigen/CXX11/Tensor>
+// #include<unsupported/Eigen/CXX11/Tensor>
 // #include<cstdlib>
 // #include<ctime>
 #include<algorithm>
 #include<string>
 #include<filesystem>
 #include "seed_generator.h"
+#include "disc_qfunc.h"
 
 // Cap of 28 qubits for sure, unless unsigned int are changed for unsigned long
 
 const unsigned int D = 7;
 const unsigned int n_qubits = 2;
-const unsigned int Max_Time = 2;
+const unsigned int Max_Time = 400;
 const float w = 2*EIGEN_PI/D;
-const unsigned int qubitstate_size = 1 << n_qubits;
+const unsigned int qubitstate_size = 1 << n_qubits; // Supports max 32 qubits
 const float sqrt2 = sqrt(2);
 const std::complex<float> im(0.0,1.0);
 const Eigen::Vector2cf qubit_instate(std::complex(1.0/sqrt2,0.0),std::complex(0.0,1.0/sqrt2)); // Assumes all qubits are initialized to this state

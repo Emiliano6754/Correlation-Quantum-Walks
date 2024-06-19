@@ -56,6 +56,7 @@
   "C_Cpp_Runner.showCompilationTime": false,
   "C_Cpp_Runner.useLinkTimeOptimization": false,
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
+  "C_Cpp.default.cppStandard": "c++20",
   "files.associations": {
     "iostream": "cpp",
     "ostream": "cpp",
@@ -124,6 +125,8 @@
     "span": "cpp",
     "variant": "cpp",
     "unordered_set": "cpp",
-    "matrixfunctions": "cpp"
+    "matrixfunctions": "cpp",
+    "dense": "cpp",
+    "openglsupport": "cpp"
   }
 }
