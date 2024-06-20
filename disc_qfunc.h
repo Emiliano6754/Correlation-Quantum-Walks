@@ -3,7 +3,8 @@
 
 #include<Eigen/Dense>
 
-inline void sym_Qfunc(Eigen::MatrixXcd &Qfunc, const unsigned int &n_qubits, const Eigen::VectorXcd &state);
-inline void sym_sumQ2(double &sum, const unsigned int &n_qubits, const Eigen::VectorXcd &state);
+void sym_Qfunc(Eigen::MatrixXcd &Qfunc, const unsigned int &n_qubits, const Eigen::VectorXcd &state);
+void sym_sumQ2(double &sum, const unsigned int &n_qubits, const Eigen::VectorXcd &state);
+void generate_fiducial(Eigen::VectorXcd &fiducial, const unsigned int n_qubits, const unsigned int qubitstate_size, const std::complex<double> &xi);
 
 #endif
