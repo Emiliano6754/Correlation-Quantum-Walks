@@ -127,6 +127,8 @@
     "unordered_set": "cpp",
     "matrixfunctions": "cpp",
     "dense": "cpp",
-    "openglsupport": "cpp"
+    "openglsupport": "cpp",
+    "cstdarg": "cpp",
+    "cinttypes": "cpp"
   }
 }

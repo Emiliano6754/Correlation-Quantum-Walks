@@ -8,28 +8,25 @@
 #include<algorithm>
 #include<string>
 #include<filesystem>
+#include<stdexcept>  // std::invalid_argument, std::out_of_range
+#include<limits>     // std::numeric_limits
+#include<chrono> // Timing
 #include "omp.h"
 #include "seed_generator.h"
 #include "disc_qfunc.h"
 
 // Consider compiling with  -O3 -ffast-math to optimize powers
 
-// Cap of 28 qubits for sure, unless unsigned int are changed for unsigned long
+// Cap of 28 qubits for sure, unless unsigned int in qubitstate_size and related are changed for unsigned long
 
-const unsigned int D = 7;
-const unsigned int n_qubits = 15;
-const unsigned int Max_Time = 400;
+const unsigned int D = 101;
 const double w = 2*EIGEN_PI/D;
-const unsigned int qubitstate_size = 1 << n_qubits; // Supports max 32 qubits
 const double sqrt2 = sqrt(2);
 const std::complex<double> im(0.0,1.0);
 const Eigen::Vector2cd qubit_instate(std::complex(1.0/sqrt2,0.0),std::complex(0.0,1.0/sqrt2)); // Assumes all qubits are initialized to this state
 const Eigen::VectorXcd pinstate = Eigen::VectorXcd::Constant(D,1.0/sqrt(D)); // It also assumes position initialized at |0>
 
-inline std::complex<double> omega(const unsigned int &p) {
-    return std::exp(w*p*im);
-}
-
+// Will cause overflow issues when D > 43,000 because of instances omega(p*q)
 inline std::complex<double> omega(const int &p) {
     return std::exp(w*p*im);
 }
@@ -95,7 +92,7 @@ inline void write_state_as_is(const std::vector<Eigen::VectorXcd> &state, const 
 }
 
 // Assumes state is of size D, and that a number TimeSize of full qubitstates is compressed in each VectorXcd
-inline void write_state_reordered(const std::vector<Eigen::VectorXcd> &state, const unsigned int &TimeSize, const std::string &filename) {
+inline void write_state_reordered(const unsigned int qubitstate_size, const std::vector<Eigen::VectorXcd> &state, const unsigned int &TimeSize, const std::string &filename) {
     const std::filesystem::path cwd = std::filesystem::current_path();
     std::ofstream output_file(cwd.string()+"/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
     if (output_file.is_open()) {
@@ -114,7 +111,7 @@ inline void write_state_reordered(const std::vector<Eigen::VectorXcd> &state, co
 }
 
 // Assumes interaction_counts has been adequately allocated and sized
-inline void count_interactions(Eigen::Matrix<unsigned int, Eigen::Dynamic, Eigen::Dynamic> &interaction_counts, const std::vector<unsigned int> &interaction_seed, const unsigned int max_time) {
+inline void count_interactions(const unsigned int n_qubits, Eigen::Matrix<unsigned int, Eigen::Dynamic, Eigen::Dynamic> &interaction_counts, const std::vector<unsigned int> &interaction_seed, const unsigned int max_time) {
     for (unsigned int n = 0; n < n_qubits; n++) {
             interaction_counts(0,n) = 0;
         }
@@ -126,7 +123,7 @@ inline void count_interactions(Eigen::Matrix<unsigned int, Eigen::Dynamic, Eigen
 }
 
 // Initializes all qubits to their correct state at time t. Assumes the full buffer contains D buffers, but generates each of them to the appropriate 
-inline void initialize_qubitstates_buffer(const unsigned int &t, const std::vector<unsigned int> &interaction_seed, std::vector<std::vector<Eigen::Vector2cd>> &fullqubitstates_buffers) {
+inline void initialize_qubitstates_buffer(const unsigned int n_qubits, const unsigned int &t, const std::vector<unsigned int> &interaction_seed, std::vector<std::vector<Eigen::Vector2cd>> &fullqubitstates_buffers) {
     if (t == 0) {
         for (unsigned int p = 0; p < D; p++) {
             fullqubitstates_buffers[p].assign(n_qubits,qubit_instate);
@@ -137,14 +134,14 @@ inline void initialize_qubitstates_buffer(const unsigned int &t, const std::vect
 }
 
 // Evolved state only contains the evolution for p from t (starting at t+1) to T and is compressed. Evolved_state should be sized adequately. Limited in memory by (T-t)*qubitstatesize * 16 bytes (size of complex<double>)
-inline void Pevolution_fromt_toT(const unsigned int &p, const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<Eigen::Vector2cd> &qubitstates, Eigen::VectorXcd &evolved_state) {
+inline void Pevolution_fromt_toT(const unsigned int n_qubits, const unsigned int qubitstate_size, const unsigned int &p, const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<Eigen::Vector2cd> &qubitstates, Eigen::VectorXcd &evolved_state) {
     Eigen::Matrix2cd evolution_matrix;
     evolution_matrix << -1/sqrt2 * omega(p), 1/sqrt2 * omega(p),
                         1/sqrt2 * omega(-p), 1/sqrt2 * omega(-p); // Could probably initiallize all of them at the beginning as a const vector. It would only take D*4*16 bytes of memory, and the compiler could potentially insert the matrix manually instead of searching for it.
     unsigned int time_pos = 0;
     const std::complex<double> in_pcoeff = pinstate(p);
     std::complex<double> coeff = 0;
-    for (unsigned int s = t+1; s <= T; s++) {
+    for (unsigned int s = t; s < T; s++) {
         qubitstates[interaction_seed[s]] = evolution_matrix*qubitstates[interaction_seed[s]];
         // Loop for all possible qubit states, the binary representation of n gives the corresponding qubits' states. Multiply initial coefficient of the spatial state by the evolved state of each qubit.
         for (unsigned int n = 0; n < qubitstate_size; n++) {
@@ -158,7 +155,7 @@ inline void Pevolution_fromt_toT(const unsigned int &p, const unsigned int &t, c
     }
 }
 
-inline void evolution_fromt_toT(const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<std::vector<Eigen::Vector2cd>> &fullqubitstates_buffers, std::vector<Eigen::VectorXcd> &full_evolved_state) {
+inline void evolution_fromt_toT(const unsigned int n_qubits, const unsigned int qubitstate_size, const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<std::vector<Eigen::Vector2cd>> &fullqubitstates_buffers, std::vector<Eigen::VectorXcd> &full_evolved_state) {
     // Eigen::Matrix<unsigned int, Eigen::Dynamic, Eigen::Dynamic> interaction_counts(T,n_qubits);
     // count_interactions(interaction_counts,interaction_seed,T);
     // Eigen::Tensor<std::complex<double>, 3> full_evolved_state(T-t+1, D, qubitstate_size);
@@ -167,7 +164,7 @@ inline void evolution_fromt_toT(const unsigned int &t, const unsigned int &T, co
         full_evolved_state[p].resize((T-t+1)*qubitstate_size);
         
         // Before threading this, p should be passed by value, not by reference. Actually not necessary, the for loop is divided by the number of threads
-        Pevolution_fromt_toT(p,t,T,interaction_seed,fullqubitstates_buffers[p],full_evolved_state[p]);
+        Pevolution_fromt_toT(n_qubits,qubitstate_size,p,t,T,interaction_seed,fullqubitstates_buffers[p],full_evolved_state[p]);
     }
 }
 
@@ -184,59 +181,100 @@ inline void transform_evolved_state(const std::vector<Eigen::VectorXcd> &pevolve
 }
 
 // Calculates all sums of Q^2 and returns P(m)*sum Q^2 in Qsums, with shape (D,steps_taken). Assumes Qsums already contains the correct number of vectors, but initializes each vector to a steps_taken number of 0s. Can be parallelized by taking each m independently. Maybe could be optimized changind Qsums to an Eigen matrix/vectors.
-inline void calculate_sumofQ2(const std::vector<Eigen::VectorXcd> &full_state, const unsigned int steps_taken, std::vector<Eigen::VectorXd> &Qsums) {
+inline void calculate_sumofQ2(const unsigned int n_qubits, const unsigned int qubitstate_size, std::vector<Eigen::VectorXcd> &full_state, const unsigned int steps_taken, std::vector<Eigen::VectorXd> &Qsums) {
     for (unsigned int m = 0; m < D; m++) {
         Qsums[m] = Eigen::VectorXd::Zero(steps_taken);
         unsigned int delta_t = 0;
         for (unsigned int t = 0; t < steps_taken; t++) {
-            Eigen::Map<const Eigen::VectorXcd> qubit_state(full_state[m].data()+delta_t,qubitstate_size);
+            Eigen::Map<Eigen::VectorXcd> qubit_state(full_state[m].data()+delta_t,qubitstate_size);
+            // qubit_state.normalize();
             sym_sumQ2(Qsums[m][t],n_qubits,qubit_state);
-            Qsums[m][t] *= qubit_state.squaredNorm(); // squaredNorm = P(m)
+            Qsums[m][t] /= qubit_state.squaredNorm(); // squaredNorm = P(m)
             delta_t += qubitstate_size;
         }
     }
 }
 
+// Returns the average sum of Q^2 in the first entry of the vector of sums
+inline void average_sumofQ2(std::vector<Eigen::VectorXd> &Qsums) {
+    for (unsigned int p = 1; p < D; p++) {
+        Qsums[0] += Qsums[p];
+    }
+}
+
+inline void save_sums(const Eigen::VectorXd &Qsums, const std::string filename) {
+    const std::filesystem::path cwd = std::filesystem::current_path();
+    std::ofstream output_file(cwd.string()+"/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
+    if (output_file.is_open()) {
+        output_file << Qsums;
+    } else {
+        std::cout << "Could not save Qsums" << std::endl;
+    }
+}
+
 // For now, it just goes from 0 to T stupidly and it doesn't parallelize anything
-inline void generate_and_evolve_seed_toT(const unsigned int T, const std::string &seed_filename, const std::string &output_filename) {
+inline void generate_and_evolve_seed_toT(const unsigned int n_qubits, const unsigned int qubitstate_size, const unsigned int T, const std::string &seed_filename, const std::string &Qsums_filename, const std::string &output_filename) {
     std::cout << "Generating seed" << std::endl;
     generate_seed(n_qubits,T,seed_filename);
     std::vector<unsigned int> interaction_seed(T);
     std::cout << "Parsing seed" << std::endl;
     parse_interaction_seed(seed_filename,0,T,interaction_seed);
-    // std::cout << "Counting interactions" << std::endl;
-    // Eigen::Matrix<unsigned int, Eigen::Dynamic, Eigen::Dynamic> interaction_counts(T+1,n_qubits);
-    // count_interactions(interaction_counts,interaction_seed,T);
     std::cout << "Initializing qubits" << std::endl;
     std::vector<std::vector<Eigen::Vector2cd>> fullqubitstates_buffers(D);
-    initialize_qubitstates_buffer(0,interaction_seed,fullqubitstates_buffers);
+    initialize_qubitstates_buffer(n_qubits,0,interaction_seed,fullqubitstates_buffers);
     std::cout << "Evolving state" << std::endl;
     std::vector<Eigen::VectorXcd> full_pevolved_state(D);
-    evolution_fromt_toT(0,T,interaction_seed,fullqubitstates_buffers,full_pevolved_state);
+    evolution_fromt_toT(n_qubits,qubitstate_size,0,T,interaction_seed,fullqubitstates_buffers,full_pevolved_state);
     std::cout << "Transforming state" << std::endl;
     std::vector<Eigen::VectorXcd> finstate(D);
     transform_evolved_state(full_pevolved_state,finstate);
-    std::cout << "Writing reordered state" << std::endl;
-    write_state_reordered(full_pevolved_state,T,"estadop.txt");
-    write_state_reordered(finstate,T,output_filename);
     std::cout << "Calculating sums of Q^2" << std::endl;
     std::vector<Eigen::VectorXd> Qsums(D);
-    calculate_sumofQ2(finstate,T,Qsums);
+    auto start = std::chrono::high_resolution_clock::now();
+    calculate_sumofQ2(n_qubits,qubitstate_size,finstate,T,Qsums);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float> duration = end - start;
+    std::cout << "Calculating took " << duration.count() << "s" << std::endl;
+    std::cout << "Averaging sums of Q^2" << std::endl;
+    average_sumofQ2(Qsums);
+    std::cout << "Writing average sums of Q^2" << std::endl;
+    save_sums(Qsums[0],Qsums_filename);
+    std::cout << "Writing reordered state" << std::endl;
+    // write_state_reordered(qubitstate_size,full_pevolved_state,T,"estadop.txt");
+    write_state_reordered(qubitstate_size,finstate,T,output_filename);
+}
 
+inline void parse_unsignedint(const std::string &input, unsigned int &parsed_input) {
+    try {
+        unsigned long u = std::stoul(input);
+        if (u > std::numeric_limits<unsigned int>::max())
+            throw std::out_of_range(input);
+
+        parsed_input = u;
+    } catch (const std::invalid_argument& e) {
+        std::cout << "Input could not be parsed: " << e.what() << std::endl;
+    } catch (const std::out_of_range& e) {
+        std::cout << "Input out of range: " << e.what() << std::endl;
+    }
 }
 
 int main() {
-    // std::string seed_filename = "seedtest.txt";
-    // std::string output_filename = "testo.txt";
-    // generate_and_evolve_seed_toT(Max_Time,seed_filename,output_filename);
-    Eigen::VectorXcd fiducial(qubitstate_size);
-    std::complex<double> xi = 0.5*(sqrt(3)-1)*std::complex<double>(1.0,1.0);
-    generate_fiducial(fiducial, n_qubits, qubitstate_size,xi);
-    std::cout << "Fiducial calculated" << std::endl;
-    // std::cout << fiducial << std::endl;
-    double fiducial_sum = 0;
-    sym_sumQ2(fiducial_sum,n_qubits,fiducial);
-    std::cout << fiducial_sum << std::endl;
+    std::string input;
+    std::cout << "Enter the number of qubits" << std::endl;
+    std::cin >> input;
+    unsigned int n_qubits;
+    parse_unsignedint(input,n_qubits);
+    input = "";
+    std::cout << "Enter the number of steps to take" << std::endl;
+    std::cin >> input;
+    unsigned int max_time;
+    parse_unsignedint(input,max_time);
+    const unsigned int qubitstate_size = 1 << n_qubits; // Supports max 32 qubits
+    std::string seed_filename = "seed_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+    std::string Qsums_filename = "qsums_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+    std::string output_filename = "state_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+
+    generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,output_filename);
 
     return 0;
 }

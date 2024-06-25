@@ -43,19 +43,24 @@ void sym_sumQ2(double &sum, const unsigned int &n_qubits, const Eigen::VectorXcd
     const std::complex<double> xi = 0.5*(sqrt(3)-1)*std::complex<double>(1.0,1.0);
     std::map<unsigned int, std::complex<double>> xi_buffer{};
     generate_xi_buffer(xi_buffer,n_qubits,xi);
-    std::map<unsigned int, std::complex<double>> im_buffer{{0,std::complex<double>(1.0,0.0)},{1,std::complex<double>(0.0,-1.0)}}; // Required for (-i)^tr(ab)
+    // std::map<unsigned int, std::complex<double>> im_buffer{{0,std::complex<double>(1.0,0.0)},{1,std::complex<double>(0.0,-1.0)}}; // Required for (-i)^tr(ab). Not even required, given the absolute value
     std::map<unsigned int, double> sign_buffer{{0,1.0},{1,-1.0}}; // Required for (-1)^tr(ab). std::complex requires double to perform multiplication :|
     const double denom = 1.0 / std::pow(1+std::norm(xi), n_qubits);
-    std::complex<double> coeff;
-    #pragma omp parallel for
-    for (unsigned int alpha = 0; alpha < qubitstate_size; alpha++) {
-        for (unsigned int beta = 0; beta < qubitstate_size; beta++) {
-            coeff = 0;
-            for (unsigned int eta = 0; eta < qubitstate_size; eta++) {
-                coeff += sign_buffer[trace(alpha,eta)] * xi_buffer[std::popcount(beta ^ eta)] * state[eta];
+
+    #pragma omp parallel reduction(+:sum) 
+    {
+        std::complex<double> coeff = 0;
+        
+        #pragma omp for
+        for (unsigned int alpha = 0; alpha < qubitstate_size; alpha++) {
+            for (unsigned int beta = 0; beta < qubitstate_size; beta++) {
+                coeff = 0;
+                for (unsigned int eta = 0; eta < qubitstate_size; eta++) {
+                    coeff += sign_buffer[trace(alpha,eta)] * xi_buffer[std::popcount(beta ^ eta)] * state[eta];
+                }
+                // coeff = im_buffer[trace(alpha,beta)] * coeff;
+                sum += std::pow(std::norm(coeff),2);
             }
-            coeff = im_buffer[trace(alpha,beta)] * coeff;
-            sum += std::pow(std::norm(coeff),2);
         }
     }
     sum *= denom*denom;
