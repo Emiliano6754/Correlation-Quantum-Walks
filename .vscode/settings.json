@@ -129,6 +129,7 @@
     "dense": "cpp",
     "openglsupport": "cpp",
     "cstdarg": "cpp",
-    "cinttypes": "cpp"
+    "cinttypes": "cpp",
+    "hash_map": "cpp"
   }
 }
