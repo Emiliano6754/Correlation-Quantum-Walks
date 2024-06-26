@@ -205,17 +205,28 @@ inline void average_sumofQ2(std::vector<Eigen::VectorXd> &Qsums) {
 inline void save_sums(const Eigen::VectorXd &Qsums, const std::string filename) {
     const std::filesystem::path cwd = std::filesystem::current_path();
     std::ofstream output_file(cwd.string()+"/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
+    Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
     if (output_file.is_open()) {
-        output_file << Qsums;
+        output_file << Qsums.format(FullPrecision);
     } else {
         std::cout << "Could not save Qsums" << std::endl;
     }
 }
 
 // For now, it just goes from 0 to T stupidly and it doesn't parallelize anything
-inline void generate_and_evolve_seed_toT(const unsigned int n_qubits, const unsigned int qubitstate_size, const unsigned int T, const std::string &seed_filename, const std::string &Qsums_filename, const std::string &output_filename) {
+inline void generate_and_evolve_seed_toT(const unsigned int n_qubits, const unsigned int qubitstate_size, const unsigned int T, const std::string &seed_filename, const std::string &Qsums_filename, const std::string &output_filename, const bool &save_state, const unsigned int &interaction_pattern) {
     std::cout << "Generating seed" << std::endl;
-    generate_seed(n_qubits,T,seed_filename);
+    switch(interaction_pattern) {
+        case 0:
+            generate_random_seed(n_qubits,T,seed_filename);
+            break;
+        case 1:
+            generate_ordered_seed(n_qubits,T,seed_filename);
+            break;
+        case 2:
+            generate_biased_seed(n_qubits,T,seed_filename);
+            break;
+    }
     std::vector<unsigned int> interaction_seed(T);
     std::cout << "Parsing seed" << std::endl;
     parse_interaction_seed(seed_filename,0,T,interaction_seed);
@@ -239,9 +250,10 @@ inline void generate_and_evolve_seed_toT(const unsigned int n_qubits, const unsi
     average_sumofQ2(Qsums);
     std::cout << "Writing average sums of Q^2" << std::endl;
     save_sums(Qsums[0],Qsums_filename);
-    std::cout << "Writing reordered state" << std::endl;
-    // write_state_reordered(qubitstate_size,full_pevolved_state,T,"estadop.txt");
-    write_state_reordered(qubitstate_size,finstate,T,output_filename);
+    if (save_state) {
+        std::cout << "Writing reordered state" << std::endl;
+        write_state_reordered(qubitstate_size,finstate,T,output_filename);
+    }
 }
 
 inline void parse_unsignedint(const std::string &input, unsigned int &parsed_input) {
@@ -273,8 +285,47 @@ int main() {
     std::string seed_filename = "seed_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
     std::string Qsums_filename = "qsums_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
     std::string output_filename = "state_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+    bool selected = false;
+    unsigned int interaction_pattern;
+    while (!selected) {
+        std::cout << "Enter the interaction pattern to take [r(andom),o(rdered),b(iased)]" << std::endl;
+        input = "";
+        std::cin >> input;
+        if (input == "random" || input == "r") {
+            interaction_pattern = 0;
+            seed_filename.insert(seed_filename.begin(),'r');
+            Qsums_filename.insert(Qsums_filename.begin(),'r');
+            output_filename.insert(output_filename.begin(),'r');
+            selected = true;
+        } else if (input == "ordered" || input == "o") {
+            interaction_pattern = 1;
+            seed_filename.insert(seed_filename.begin(),'o');
+            Qsums_filename.insert(Qsums_filename.begin(),'o');
+            output_filename.insert(output_filename.begin(),'o');
+            selected = true;
+        } else if (input == "biased" || input == "b") {
+            interaction_pattern = 2;
+            seed_filename.insert(seed_filename.begin(),'b');
+            Qsums_filename.insert(Qsums_filename.begin(),'b');
+            output_filename.insert(output_filename.begin(),'b');
+            selected = true;
+        }
+    }
+    selected = false;
+    bool save_state;
+    while (!selected) {
+        std::cout << "Save state? [y/N]" << std::endl;
+        input = "";
+        std::cin >> input;
+        if (input == "yes" || input == "y" || input == "Y") {
+            save_state = true;
+            selected = true;
+        }
+        save_state = false;
+        selected = true;
+    }
 
-    generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,output_filename);
+    generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,output_filename,save_state,interaction_pattern);
 
     return 0;
 }
