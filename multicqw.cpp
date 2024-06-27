@@ -19,12 +19,12 @@
 
 // Cap of 28 qubits for sure, unless unsigned int in qubitstate_size and related are changed for unsigned long
 
-const unsigned int D = 21;
-const double w = 2*EIGEN_PI/D;
+unsigned int D = 101;
+double w = 2*EIGEN_PI/D;
 const double sqrt2 = sqrt(2);
 const std::complex<double> im(0.0,1.0);
 const Eigen::Vector2cd qubit_instate(std::complex(1.0/sqrt2,0.0),std::complex(0.0,1.0/sqrt2)); // Assumes all qubits are initialized to this state
-const Eigen::VectorXcd pinstate = Eigen::VectorXcd::Constant(D,1.0/sqrt(D)); // It also assumes position initialized at |0>
+Eigen::VectorXcd pinstate = Eigen::VectorXcd::Constant(D,1.0/sqrt(D)); // It also assumes position initialized at |0>
 
 // Will cause overflow issues when D > 43,000 because of instances omega(p*q)
 inline std::complex<double> omega(const int &p) {
@@ -44,7 +44,7 @@ inline void generate_matrix_powers_buffer(std::vector<Eigen::Matrix2cd> &powers_
 // Positions elements parsed between ini_time and fin_time in those positions inside interaction_seed 
 inline void parse_interaction_seed(const std::string &seed_filename, const unsigned int &ini_time, const unsigned int &fin_time, std::vector<unsigned int> &interaction_seed) {
     const std::filesystem::path cwd = std::filesystem::current_path();
-    std::ifstream seed_file(cwd.string()+"/seedsdata/"+seed_filename,std::ifstream::in);
+    std::ifstream seed_file(cwd.string()+"/data/seeds/"+seed_filename,std::ifstream::in);
     if (seed_file.is_open()) {
         const unsigned int length = std::count(std::istreambuf_iterator<char>(seed_file),std::istreambuf_iterator<char>(),'\n');
         std::cout << length << std::endl;
@@ -176,13 +176,12 @@ inline void transform_evolved_state(const std::vector<Eigen::VectorXcd> &pevolve
 }
 
 // Calculates all sums of Q^2 and returns P(m)*sum Q^2 in Qsums, with shape (D,steps_taken). Assumes Qsums already contains the correct number of vectors, but initializes each vector to a steps_taken number of 0s. Can be parallelized by taking each m independently. Maybe could be optimized changind Qsums to an Eigen matrix/vectors.
-inline void calculate_sumofQ2(const unsigned int &n_qubits, const unsigned int &qubitstate_size, std::vector<Eigen::VectorXcd> &full_state, const unsigned int &steps_taken, std::vector<Eigen::VectorXd> &Qsums) {
+inline void calculate_sumofQ2(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const std::vector<Eigen::VectorXcd> &full_state, const unsigned int &steps_taken, std::vector<Eigen::VectorXd> &Qsums) {
     for (unsigned int m = 0; m < D; m++) {
         Qsums[m] = Eigen::VectorXd::Zero(steps_taken);
         unsigned int delta_t = 0;
         for (unsigned int t = 0; t < steps_taken; t++) {
-            Eigen::Map<Eigen::VectorXcd> qubit_state(full_state[m].data()+delta_t,qubitstate_size);
-            // qubit_state.normalize();
+            Eigen::Map<const Eigen::VectorXcd> qubit_state(full_state[m].data()+delta_t,qubitstate_size);
             sym_sumQ2(Qsums[m][t],n_qubits,qubit_state);
             Qsums[m][t] /= qubit_state.squaredNorm(); // squaredNorm = P(m)
             delta_t += qubitstate_size;
@@ -198,7 +197,6 @@ inline void calculate_sumofQ2_with_probs(const unsigned int &n_qubits, const uns
         unsigned int delta_t = 0;
         for (unsigned int t = 0; t < steps_taken; t++) {
             Eigen::Map<const Eigen::VectorXcd> qubit_state(full_state[m].data()+delta_t,qubitstate_size);
-            // qubit_state.normalize();
             sym_sumQ2(Qsums[m][t],n_qubits,qubit_state);
             probs[m][t] = qubit_state.squaredNorm();
             Qsums[m][t] /= probs[m][t]; // squaredNorm = P(m)
@@ -244,7 +242,7 @@ inline void save_probs(const std::vector<Eigen::VectorXd> &probs, const std::str
     Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
     if (output_file.is_open()) {
         for (unsigned int m = 0; m < D; m++) {
-            output_file << probs[m].format(FullPrecision);
+            output_file << probs[m].format(FullPrecision) << std::endl;
         }
     } else {
         std::cout << "Could not save probs" << std::endl;
@@ -330,6 +328,14 @@ inline void parse_unsignedint(const std::string &input, unsigned int &parsed_inp
 
 int main() {
     std::string input;
+    std::cout << "Enter the center dimension [101]" << std::endl;
+    if (std::cin.peek() != '\n') {
+        std::cin >> input;
+        parse_unsignedint(input,D);
+        w = 2*EIGEN_PI/D;
+        pinstate = Eigen::VectorXcd::Constant(D,1.0/sqrt(D));
+    }
+    input = "";
     std::cout << "Enter the number of qubits" << std::endl;
     std::cin >> input;
     unsigned int n_qubits;
@@ -374,39 +380,27 @@ int main() {
     probs_filename.insert(probs_filename.begin(),prefix);
     output_filename.insert(output_filename.begin(),prefix);
 
-    bool calculate_qsums;
+    std::getline(std::cin, input); // Needed to clean cin before taking more input
+    bool calculate_qsums = true;
     std::cout << "Calculate and save sums of Q^2? [Y,n]" << std::endl;
-    if (std::cin.peek() == '\n') {
-        calculate_qsums = true;
-    } else {
-        std::cin >> input;
-        if (input == "no" || input == "n" || input == "N") {
-            calculate_qsums = false;
-        }
-        calculate_qsums = true;
-    }
-    bool calculate_probabilities;
-    std::cout << "Calculate and save probability distributions? [Y,n]" << std::endl;
-    if (std::cin.peek() == '\n') {
-        calculate_probabilities = true;
-    } else {
-        std::cin >> input;
-        if (input == "no" || input == "n" || input == "N") {
-            calculate_probabilities = false;
-        }
-        calculate_probabilities = true;
-    }
-    bool save_state;
-    std::cout << "Save state? [y/N]" << std::endl;
     input = "";
-    if (std::cin.peek() == '\n') {
-        save_state = false;
-    } else {
-        std::cin >> input;
-        if (input == "yes" || input == "y" || input == "Y") {
-            save_state = true;
-        }
-        save_state = false;
+    std::getline(std::cin, input);
+    if (input == "no" || input == "n" || input == "N") {
+        calculate_qsums = false;
+    }
+    bool calculate_probabilities = true;
+    input = "";
+    std::cout << "Calculate and save probability distributions? [Y,n]" << std::endl;
+    std::getline(std::cin, input);
+    if (input == "no" || input == "n" || input == "N") {
+        calculate_probabilities = false;
+    }
+    bool save_state = false;
+    input = "";
+    std::cout << "Save state? [y/N]" << std::endl;
+    std::getline(std::cin, input);
+    if (input == "yes" || input == "y" || input == "Y") {
+        save_state = true;
     }
     
     generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,interaction_pattern);
