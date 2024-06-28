@@ -19,7 +19,7 @@
 
 // Cap of 28 qubits for sure, unless unsigned int in qubitstate_size and related are changed for unsigned long
 
-unsigned int D = 101;
+unsigned int D = 10;
 double w = 2*EIGEN_PI/D;
 const double sqrt2 = sqrt(2);
 const std::complex<double> im(0.0,1.0);
@@ -402,8 +402,29 @@ int main() {
     if (input == "yes" || input == "y" || input == "Y") {
         save_state = true;
     }
-    
     generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,interaction_pattern);
+    
+
+    // const unsigned int qubits[11] = {1,2,3,4,5,6,7,8,9,10,11};
+    // const unsigned int max_time = 300;
+    // const unsigned int interaction_pattern = 0;
+    // bool save_state = false;
+    // bool calculate_qsums = true;
+    // bool calculate_probabilities = true;
+    // for (unsigned int n_qubits : qubits) {
+    //     std::cout << n_qubits << std::endl;
+    //     const unsigned int qubitstate_size = 1 << n_qubits;
+    //     std::string seed_filename = "seed_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+    //     std::string Qsums_filename = "qsums_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+    //     std::string probs_filename = "probs_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+    //     std::string output_filename = "state_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+    //     char prefix = 'r';
+    //     seed_filename.insert(seed_filename.begin(),prefix);
+    //     Qsums_filename.insert(Qsums_filename.begin(),prefix);
+    //     probs_filename.insert(probs_filename.begin(),prefix);
+    //     output_filename.insert(output_filename.begin(),prefix);
+    //     generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,interaction_pattern);
+    // }
 
     return 0;
 }
