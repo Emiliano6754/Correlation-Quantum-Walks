@@ -42,15 +42,63 @@ void generate_fiducial(Eigen::VectorXcd &fiducial, const unsigned int n_qubits, 
     }
 }
 
-void sym_Qfunc(Eigen::MatrixXcd &Qfunc, const unsigned int &n_qubits, const Eigen::VectorXcd &state) {
+// Calculates the Q function for state and returns it in Qfunc. Assumes Qfunc is already shaped adequately. Requires state to be normalized. Else, it returns squarednorm * Q(alpha,beta). Supports max 32 qubits, limited by qubitstate_size and the variables for the loops
+void sym_Qfunc(Eigen::MatrixXd &Qfunc, const unsigned int &n_qubits, const unsigned int &qubitstate_size, const Eigen::VectorXcd &state) {
+    const std::complex<double> xi = 0.5 * (sqrt(3)-1) * std::complex<double>(1.0,1.0);
+    std::complex<double>* xi_buffer = static_cast<std::complex<double>*>(alloca((n_qubits+1) * sizeof(std::complex<double>)));
+    generate_stack_xi_buffer(xi_buffer,n_qubits,xi);
+    const double denom = 1.0 / std::pow(1+std::norm(xi), n_qubits);
 
+    #pragma omp parallel
+    {
+        std::complex<double> coeff = 0;
+        
+        #pragma omp for
+        for (unsigned int alpha = 0; alpha < qubitstate_size; alpha++) {
+            for (unsigned int beta = 0; beta < qubitstate_size; beta++) {
+                coeff = 0;
+                for (unsigned int eta = 0; eta < qubitstate_size; eta++) {
+                    coeff += (1.0 - 2 * trace(alpha,eta)) * xi_buffer[std::popcount(beta ^ eta)] * state[eta];
+                }
+                Qfunc(alpha,beta) += std::norm(coeff) * denom;
+            }
+        }
+    }
+}
+
+/* 
+Calculates the squared Q function for state and returns it in Qfunc. 
+
+Assumes Qfunc is already shaped adequately. Requires state to be normalized. Else, it returns squarednorm^2 * Q^2(alpha,beta). 
+Supports max 32 qubits, limited by qubitstate_size and the variables for the loops. Takes in both n_qubits and qubitstate_size to reduce load on main thread
+*/
+void sym_squared_Qfunc(Eigen::MatrixXd &squared_Qfunc, const unsigned int &n_qubits, const unsigned int &qubitstate_size, const Eigen::VectorXcd &state) {
+    const std::complex<double> xi = 0.5 * (sqrt(3)-1) * std::complex<double>(1.0,1.0);
+    std::complex<double>* xi_buffer = static_cast<std::complex<double>*>(alloca((n_qubits+1) * sizeof(std::complex<double>)));
+    generate_stack_xi_buffer(xi_buffer,n_qubits,xi);
+    const double denom = 1.0 / std::pow(1+std::norm(xi), 2*n_qubits);
+
+    #pragma omp parallel
+    {
+        std::complex<double> coeff = 0;
+        
+        #pragma omp for
+        for (unsigned int alpha = 0; alpha < qubitstate_size; alpha++) {
+            for (unsigned int beta = 0; beta < qubitstate_size; beta++) {
+                coeff = 0;
+                for (unsigned int eta = 0; eta < qubitstate_size; eta++) {
+                    coeff += (1.0 - 2 * trace(alpha,eta)) * xi_buffer[std::popcount(beta ^ eta)] * state[eta];
+                }
+                squared_Qfunc(alpha,beta) = std::pow(std::norm(coeff),2) * denom;
+            }
+        }
+    }
 }
 
 // Returns the sum of Q^2 for state in sum. Requires state to be normalized. Else, it returns squarednorm^2 * sum Q^2. Supports max 32 qubits, limited by qubitstate_size and the variables for the loops
-void sym_sumQ2(double &sum, const unsigned int &n_qubits, const Eigen::VectorXcd &state) {
+void sym_sumQ2(double &sum, const unsigned int &n_qubits, const unsigned int &qubitstate_size, const Eigen::VectorXcd &state) {
     sum = 0;
-    const unsigned int qubitstate_size = 1 << n_qubits;
-    const std::complex<double> xi = 0.5*(sqrt(3)-1)*std::complex<double>(1.0,1.0);
+    const std::complex<double> xi = 0.5 * (sqrt(3)-1) * std::complex<double>(1.0,1.0);
     // std::vector<std::complex<double>> xi_buffer{};
     // generate_xi_buffer(xi_buffer,n_qubits,xi);
     std::complex<double>* xi_buffer = static_cast<std::complex<double>*>(alloca((n_qubits+1) * sizeof(std::complex<double>)));

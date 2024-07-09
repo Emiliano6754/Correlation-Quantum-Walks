@@ -130,6 +130,7 @@
     "openglsupport": "cpp",
     "cstdarg": "cpp",
     "cinttypes": "cpp",
-    "hash_map": "cpp"
+    "hash_map": "cpp",
+    "valarray": "cpp"
   }
 }

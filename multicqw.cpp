@@ -33,7 +33,7 @@ inline std::complex<double> omega(const int &p) {
 }
 
 // Assumes powers_buffer already allocated enough space. Minimum value of 1 for max_power
-inline void generate_matrix_powers_buffer(std::vector<Eigen::Matrix2cd> &powers_buffer,const unsigned int &max_power, const Eigen::Matrix2cd &matrix) {
+void generate_matrix_powers_buffer(std::vector<Eigen::Matrix2cd> &powers_buffer,const unsigned int &max_power, const Eigen::Matrix2cd &matrix) {
     Eigen::MatrixPower<Eigen::Matrix2cd> matrix_power(matrix);
     powers_buffer[0] = Eigen::Matrix2cd::Identity();
     powers_buffer[1] = matrix;
@@ -43,7 +43,7 @@ inline void generate_matrix_powers_buffer(std::vector<Eigen::Matrix2cd> &powers_
 }
 
 // Positions elements parsed between ini_time and fin_time in those positions inside interaction_seed 
-inline void parse_interaction_seed(const std::string &seed_filename, const unsigned int &ini_time, const unsigned int &fin_time, std::vector<unsigned int> &interaction_seed) {
+void parse_interaction_seed(const std::string &seed_filename, const unsigned int &ini_time, const unsigned int &fin_time, std::vector<unsigned int> &interaction_seed) {
     const std::filesystem::path cwd = std::filesystem::current_path();
     std::ifstream seed_file(cwd.string()+"/data/seeds/"+seed_filename,std::ifstream::in);
     if (seed_file.is_open()) {
@@ -74,11 +74,10 @@ inline void parse_interaction_seed(const std::string &seed_filename, const unsig
     } else {
         std::cout << "Failed to open file" << std::endl;
     }
-    return;
 }
 
 // Overwrites everything in the file
-inline void write_state_as_is(const std::vector<Eigen::VectorXcd> &state, const std::string &filename) {
+void write_state_as_is(const std::vector<Eigen::VectorXcd> &state, const std::string &filename) {
     const std::filesystem::path cwd = std::filesystem::current_path();
     std::ofstream output_file(cwd.string()+"/data/states/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
     if (output_file.is_open()) {
@@ -93,7 +92,7 @@ inline void write_state_as_is(const std::vector<Eigen::VectorXcd> &state, const 
 }
 
 // Assumes state is of size D, and that a number TimeSize of full qubitstates is compressed in each VectorXcd
-inline void write_state_reordered(const unsigned int qubitstate_size, const std::vector<Eigen::VectorXcd> &state, const unsigned int &TimeSize, const std::string &filename) {
+void write_state_reordered(const unsigned int &qubitstate_size, const std::vector<Eigen::VectorXcd> &state, const unsigned int &TimeSize, const std::string &filename) {
     const std::filesystem::path cwd = std::filesystem::current_path();
     std::ofstream output_file(cwd.string()+"/data/states/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
     if (output_file.is_open()) {
@@ -112,7 +111,7 @@ inline void write_state_reordered(const unsigned int qubitstate_size, const std:
 }
 
 // Assumes interaction_counts has been adequately allocated and sized
-inline void count_interactions(const unsigned int n_qubits, Eigen::Matrix<unsigned int, Eigen::Dynamic, Eigen::Dynamic> &interaction_counts, const std::vector<unsigned int> &interaction_seed, const unsigned int max_time) {
+inline void count_interactions(const unsigned int &n_qubits, Eigen::Matrix<unsigned int, Eigen::Dynamic, Eigen::Dynamic> &interaction_counts, const std::vector<unsigned int> &interaction_seed, const unsigned int max_time) {
     for (unsigned int n = 0; n < n_qubits; n++) {
             interaction_counts(0,n) = 0;
         }
@@ -124,21 +123,21 @@ inline void count_interactions(const unsigned int n_qubits, Eigen::Matrix<unsign
 }
 
 // Initializes all qubits to their correct state at time t. Assumes the full buffer contains D buffers, but generates each of them to the appropriate 
-inline void initialize_qubitstates_buffer(const unsigned int n_qubits, const unsigned int &t, const std::vector<unsigned int> &interaction_seed, std::vector<std::vector<Eigen::Vector2cd>> &fullqubitstates_buffers) {
+inline void initialize_qubitstates_buffer(const unsigned int &n_qubits, const unsigned int &t, const std::vector<unsigned int> &interaction_seed, std::vector<std::vector<Eigen::Vector2cd>> &fullqubitstates_buffers) {
     if (t == 0) {
         for (unsigned int p = 0; p < D; p++) {
             fullqubitstates_buffers[p].assign(n_qubits,qubit_instate);
         }
     } else {
-        std::cout << "Initialization to arbitrary times not yet implemented" << std::endl; // To implement, evolution matrices need to be stored in a vector
+        std::cout << "Initialization to arbitrary times not yet implemented" << std::endl; // Should calculate each qubit state at that point of the evolution by exponentiating the corresponding evolution matrices, counting interactions with every qubit until that point.
     }
 }
 
 // Evolved state only contains the evolution for p from t (starting at t+1) to T and is compressed. Evolved_state should be sized adequately. Limited in memory by (T-t)*qubitstatesize * 16 bytes (size of complex<double>)
-inline void Pevolution_fromt_toT(const unsigned int n_qubits, const unsigned int qubitstate_size, const unsigned int &p, const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<Eigen::Vector2cd> &qubitstates, Eigen::VectorXcd &evolved_state) {
+void Pevolution_fromt_toT(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &p, const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<Eigen::Vector2cd> &qubitstates, Eigen::VectorXcd &evolved_state) {
     Eigen::Matrix2cd evolution_matrix;
     evolution_matrix << -1/sqrt2 * omega(p), 1/sqrt2 * omega(p),
-                        1/sqrt2 * omega(-p), 1/sqrt2 * omega(-p); // Could probably initiallize all of them at the beginning as a const vector. It would only take D*4*16 bytes of memory, and the compiler could potentially insert the matrix manually instead of searching for it.
+                        1/sqrt2 * omega(-p), 1/sqrt2 * omega(-p); // Could probably initiallize all of them at the beginning as a const vector. It would only take D*4*16 bytes of memory, and the compiler could potentially insert the matrix manually instead of searching for it. Only if D is compile time constant
     unsigned int time_pos = 0;
     const std::complex<double> in_pcoeff = pinstate(p);
     std::complex<double> coeff = 0;
@@ -156,7 +155,7 @@ inline void Pevolution_fromt_toT(const unsigned int n_qubits, const unsigned int
     }
 }
 
-inline void evolution_fromt_toT(const unsigned int n_qubits, const unsigned int qubitstate_size, const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<std::vector<Eigen::Vector2cd>> &fullqubitstates_buffers, std::vector<Eigen::VectorXcd> &full_evolved_state) {
+inline void evolution_fromt_toT(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<std::vector<Eigen::Vector2cd>> &fullqubitstates_buffers, std::vector<Eigen::VectorXcd> &full_evolved_state) {
     #pragma omp parallel for
     for (unsigned int p = 0; p < D; p++) {
         full_evolved_state[p].resize((T-t+1)*qubitstate_size);
@@ -183,7 +182,7 @@ inline void calculate_sumofQ2(const unsigned int &n_qubits, const unsigned int &
         unsigned int delta_t = 0;
         for (unsigned int t = 0; t < steps_taken; t++) {
             Eigen::Map<const Eigen::VectorXcd> qubit_state(full_state[m].data()+delta_t,qubitstate_size);
-            sym_sumQ2(Qsums[m][t],n_qubits,qubit_state);
+            sym_sumQ2(Qsums[m][t],n_qubits,qubitstate_size,qubit_state);
             Qsums[m][t] /= qubit_state.squaredNorm(); // squaredNorm = P(m)
             delta_t += qubitstate_size;
         }
@@ -198,7 +197,7 @@ inline void calculate_sumofQ2_with_probs(const unsigned int &n_qubits, const uns
         unsigned int delta_t = 0;
         for (unsigned int t = 0; t < steps_taken; t++) {
             Eigen::Map<const Eigen::VectorXcd> qubit_state(full_state[m].data()+delta_t,qubitstate_size);
-            sym_sumQ2(Qsums[m][t],n_qubits,qubit_state);
+            sym_sumQ2(Qsums[m][t],n_qubits,qubitstate_size,qubit_state);
             probs[m][t] = qubit_state.squaredNorm();
             Qsums[m][t] /= probs[m][t]; // squaredNorm = P(m)
             delta_t += qubitstate_size;
@@ -226,7 +225,28 @@ inline void average_sumofQ2(std::vector<Eigen::VectorXd> &Qsums) {
     }
 }
 
-inline void save_sums(const Eigen::VectorXd &Qsums, const std::string filename) {
+/*
+    Returns the different Q(alpha,beta) for all measurements in Qfuncs when measuring at time T.
+
+    Assumes Qfuncs already has D MatrixXds, each resized to (qubitstate_size,qubitstate_size).
+*/
+void calculate_squared_Qfuncs_at_T(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::vector<Eigen::VectorXcd> &full_state, std::vector<Eigen::VectorXd> &probs, std::vector<Eigen::MatrixXd> &squared_Qfuncs) {
+    const unsigned int delta_t = T * qubitstate_size;
+    for (unsigned int m = 0; m < D; m++) {
+        Eigen::Map<const Eigen::VectorXcd> qubit_state(full_state[m].data()+delta_t,qubitstate_size);
+        sym_squared_Qfunc(squared_Qfuncs[m],n_qubits,qubitstate_size,qubit_state);
+        squared_Qfuncs[m] /= probs[m][T];
+    }
+}
+
+// Returns the average Q^2 function in the first entry of the vector of matrices
+inline void average_squared_Qfuncs(std::vector<Eigen::MatrixXd> &squared_Qfuncs) {
+    for (unsigned int m = 1; m < D; m++) {
+        squared_Qfuncs[0] += squared_Qfuncs[m];
+    }
+}
+
+void save_sums(const Eigen::VectorXd &Qsums, const std::string &filename) {
     const std::filesystem::path cwd = std::filesystem::current_path();
     std::ofstream output_file(cwd.string()+"/data/sums/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
     Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
@@ -237,7 +257,7 @@ inline void save_sums(const Eigen::VectorXd &Qsums, const std::string filename) 
     }
 }
 
-inline void save_probs(const std::vector<Eigen::VectorXd> &probs, const std::string filename) {
+void save_probs(const std::vector<Eigen::VectorXd> &probs, const std::string &filename) {
     const std::filesystem::path cwd = std::filesystem::current_path();
     std::ofstream output_file(cwd.string()+"/data/probs/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
     Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
@@ -250,8 +270,21 @@ inline void save_probs(const std::vector<Eigen::VectorXd> &probs, const std::str
     }
 }
 
+void save_squared_Qfuncs(const std::vector<Eigen::MatrixXd> &squared_Qfuncs, const std::string &filename) {
+    const std::filesystem::path cwd = std::filesystem::current_path();
+    std::ofstream output_file(cwd.string()+"/data/squared_Qfuncs/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
+    Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
+    if (output_file.is_open()) {
+        for (unsigned int m = 0; m < D; m++) {
+            output_file << squared_Qfuncs[m].format(FullPrecision) << std::endl;
+        }
+    } else {
+        std::cout << "Could not save squared Qfuncs" << std::endl;
+    }
+}
+
 // For now, it just goes from 0 to T stupidly and it doesn't parallelize anything
-inline void generate_and_evolve_seed_toT(const unsigned int n_qubits, const unsigned int qubitstate_size, const unsigned int T, const std::string &seed_filename, const std::string &Qsums_filename, const std::string &probs_filename, const std::string &output_filename, const bool &save_state, const bool &calculate_qsums, const bool &calculate_probabilities, const unsigned int &interaction_pattern) {
+inline void generate_and_evolve_seed_toT(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::string &seed_filename, const std::string &Qsums_filename, const std::string &probs_filename, const std::string &squared_Qfuncs_filename, const std::string &output_filename, const bool &save_state, const bool &calculate_qsums, const bool &calculate_probabilities, const unsigned int &calculate_final_Qfuncs, const unsigned int &interaction_pattern) {
     std::cout << "Generating seed" << std::endl;
     switch(interaction_pattern) {
         case 0:
@@ -290,6 +323,14 @@ inline void generate_and_evolve_seed_toT(const unsigned int n_qubits, const unsi
             std::cout << "Calculating took " << duration.count() << "s" << std::endl;
             std::cout << "Saving probabilies" << std::endl;
             save_probs(probs,probs_filename);
+            if (calculate_final_Qfuncs) {
+                std::cout << "Calculating final Q^2" << std::endl;
+                std::vector<Eigen::MatrixXd> squared_Qfuncs(D,Eigen::MatrixXd::Zero(qubitstate_size,qubitstate_size));
+                calculate_squared_Qfuncs_at_T(n_qubits,qubitstate_size,T-1,finstate,probs,squared_Qfuncs); // Calculated at T-1, since T is not evaluated
+                average_squared_Qfuncs(squared_Qfuncs);
+                std::cout << "Saving final Q^2" << std::endl;
+                save_squared_Qfuncs(squared_Qfuncs,squared_Qfuncs_filename);
+            }
         } else{
             std::cout << "Calculating sums of Q^2" << std::endl;
             auto start = std::chrono::high_resolution_clock::now();
@@ -304,8 +345,18 @@ inline void generate_and_evolve_seed_toT(const unsigned int n_qubits, const unsi
         save_sums(Qsums[0],Qsums_filename);
     } else if (calculate_probabilities) {
         std::vector<Eigen::VectorXd> probs(D);
+        std::cout << "Calculating probabilies" << std::endl;
         calculate_probs(qubitstate_size,T,finstate,probs);
+        std::cout << "Saving probabilies" << std::endl;
         save_probs(probs,probs_filename);
+        if (calculate_final_Qfuncs) {
+            std::cout << "Calculating final Q^2" << std::endl;
+            std::vector<Eigen::MatrixXd> squared_Qfuncs(D,Eigen::MatrixXd::Zero(qubitstate_size,qubitstate_size));
+            calculate_squared_Qfuncs_at_T(n_qubits,qubitstate_size,T-1,finstate,probs,squared_Qfuncs);
+            average_squared_Qfuncs(squared_Qfuncs);
+            std::cout << "Saving final Q^2" << std::endl;
+            save_squared_Qfuncs(squared_Qfuncs,squared_Qfuncs_filename);
+        }
     }
     if (save_state) {
         std::cout << "Writing reordered state" << std::endl;
@@ -313,7 +364,7 @@ inline void generate_and_evolve_seed_toT(const unsigned int n_qubits, const unsi
     }
 }
 
-inline void parse_unsignedint(const std::string &input, unsigned int &parsed_input) {
+void parse_unsignedint(const std::string &input, unsigned int &parsed_input) {
     try {
         unsigned long u = std::stoul(input);
         if (u > std::numeric_limits<unsigned int>::max())
@@ -350,6 +401,7 @@ int main() {
     std::string seed_filename = "seed_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
     std::string Qsums_filename = "qsums_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
     std::string probs_filename = "probs_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+    std::string squared_Qfuncs_filename = "sqfuncs_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
     std::string output_filename = "state_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
     bool selected = false;
     unsigned int interaction_pattern;
@@ -379,6 +431,7 @@ int main() {
     seed_filename.insert(seed_filename.begin(),prefix);
     Qsums_filename.insert(Qsums_filename.begin(),prefix);
     probs_filename.insert(probs_filename.begin(),prefix);
+    squared_Qfuncs_filename.insert(squared_Qfuncs_filename.begin(),prefix);
     output_filename.insert(output_filename.begin(),prefix);
 
     std::getline(std::cin, input); // Needed to clean cin before taking more input
@@ -396,6 +449,15 @@ int main() {
     if (input == "no" || input == "n" || input == "N") {
         calculate_probabilities = false;
     }
+    bool calculate_squared_Qfuncs = false;
+    if (calculate_probs) {
+        input = "";
+        std::cout << "Calculate the final Q^2? [y/N]" << std::endl;
+        std::getline(std::cin, input);
+        if (input == "yes" || input == "y" || input == "Y") {
+            calculate_squared_Qfuncs = true;
+        }
+    }
     bool save_state = false;
     input = "";
     std::cout << "Save state? [y/N]" << std::endl;
@@ -403,7 +465,7 @@ int main() {
     if (input == "yes" || input == "y" || input == "Y") {
         save_state = true;
     }
-    generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,interaction_pattern);
+    generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,squared_Qfuncs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,calculate_squared_Qfuncs,interaction_pattern);
     
     // const unsigned int qubits[2] = {9,10};
     // const unsigned int max_time = 5000;
