@@ -2,6 +2,7 @@
 #include<map>
 #include<bit>
 #include<cmath>
+#include <cstdlib> // Needed for alloca (allocating on the heap the xi_buffer)
 #include "omp.h"
 
 // Calculates the field-wise trace of alpha by calculating its hamming weight and returning the last bit (modulo 2)
@@ -18,6 +19,14 @@ inline unsigned int trace(unsigned int alpha, unsigned int beta) {
 inline void generate_xi_buffer(std::vector<std::complex<double>> &xi_buffer, const unsigned int &n_qubits, const std::complex<double> &xi) {
     std::complex<double> xi_conj = std::conj(xi);
     xi_buffer.resize(n_qubits+1);
+    for (unsigned int n = 0; n <= n_qubits; n++) {
+        xi_buffer[n] = std::pow(xi_conj,n);
+    }
+}
+
+// Equivalent to generate_xi_buffer, but for a xi_buffer allocated on the stack
+inline void generate_stack_xi_buffer(std::complex<double>* xi_buffer, const unsigned int &n_qubits, const std::complex<double> &xi) {
+    std::complex<double> xi_conj = std::conj(xi);
     for (unsigned int n = 0; n <= n_qubits; n++) {
         xi_buffer[n] = std::pow(xi_conj,n);
     }
@@ -42,10 +51,10 @@ void sym_sumQ2(double &sum, const unsigned int &n_qubits, const Eigen::VectorXcd
     sum = 0;
     const unsigned int qubitstate_size = 1 << n_qubits;
     const std::complex<double> xi = 0.5*(sqrt(3)-1)*std::complex<double>(1.0,1.0);
-    std::vector<std::complex<double>> xi_buffer{};
-    generate_xi_buffer(xi_buffer,n_qubits,xi);
-    // std::map<unsigned int, std::complex<double>> im_buffer{{0,std::complex<double>(1.0,0.0)},{1,std::complex<double>(0.0,-1.0)}}; // Required for (-i)^tr(ab). Not even required, given the absolute value
-    // std::map<unsigned int, double> sign_buffer{{0,1.0},{1,-1.0}}; // Required for (-1)^tr(ab). std::complex requires double to perform multiplication :|
+    // std::vector<std::complex<double>> xi_buffer{};
+    // generate_xi_buffer(xi_buffer,n_qubits,xi);
+    std::complex<double>* xi_buffer = static_cast<std::complex<double>*>(alloca((n_qubits+1) * sizeof(std::complex<double>)));
+    generate_stack_xi_buffer(xi_buffer,n_qubits,xi);
     const double denom = 1.0 / std::pow(1+std::norm(xi), n_qubits);
 
     #pragma omp parallel reduction(+:sum) 
