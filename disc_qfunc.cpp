@@ -6,12 +6,12 @@
 #include "omp.h"
 
 // Calculates the field-wise trace of alpha by calculating its hamming weight and returning the last bit (modulo 2)
-inline unsigned int trace(unsigned int alpha) {
+inline unsigned int trace(unsigned int& alpha) {
     return std::popcount(alpha) & 0x1;
 }
 
 // Calculates the trace of the product by doing bitwise and. Equivalent to calling trace(alpha&beta)
-inline unsigned int trace(unsigned int alpha, unsigned int beta) {
+inline unsigned int trace(unsigned int& alpha, unsigned int& beta) {
     return std::popcount(alpha & beta) & 0x1;
 }
 
