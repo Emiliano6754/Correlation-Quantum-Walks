@@ -12,9 +12,12 @@
 #include<stdexcept>  // std::invalid_argument, std::out_of_range
 #include<limits>     // std::numeric_limits
 #include<chrono> // Timing
+#include<cmath> // Trigonometry, exp
 #include "omp.h"
 #include "seed_generator.h"
 #include "disc_qfunc.h"
+
+# define M_PI 3.14159265358979323846  /* pi */
 
 // Consider compiling with  -O3 -ffast-math to optimize powers
 
@@ -26,6 +29,10 @@ const double sqrt2 = sqrt(2);
 const std::complex<double> im(0.0,1.0);
 const Eigen::Vector2cd qubit_instate(std::complex(1.0/sqrt2,0.0),std::complex(0.0,1.0/sqrt2)); // Assumes all qubits are initialized to this state
 Eigen::VectorXcd pinstate = Eigen::VectorXcd::Constant(D,1.0/sqrt(D)); // It also assumes position initialized at |0>
+
+double alpha = 0;
+double beta = M_PI/2; // for balanced coin beta = pi/2 
+double gamma = M_PI; // alpha = 0, beta = pi/2, gamma = pi returns Hadamard
 
 // Will cause overflow issues when D > 43,000 because of instances omega(p*q)
 inline std::complex<double> omega(const int &p) {
@@ -136,8 +143,10 @@ inline void initialize_qubitstates_buffer(const unsigned int &n_qubits, const un
 // Evolved state only contains the evolution for p from t (starting at t+1) to T and is compressed. Evolved_state should be sized adequately. Limited in memory by (T-t)*qubitstatesize * 16 bytes (size of complex<double>)
 void Pevolution_fromt_toT(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &p, const unsigned int &t, const unsigned int &T, const std::vector<unsigned int> &interaction_seed, std::vector<Eigen::Vector2cd> &qubitstates, Eigen::VectorXcd &evolved_state) {
     Eigen::Matrix2cd evolution_matrix;
-    evolution_matrix << -1/sqrt2 * omega(p), 1/sqrt2 * omega(p),
-                        1/sqrt2 * omega(-p), 1/sqrt2 * omega(-p); // Could probably initiallize all of them at the beginning as a const vector. It would only take D*4*16 bytes of memory, and the compiler could potentially insert the matrix manually instead of searching for it. Only if D is compile time constant
+    // evolution_matrix << -1/sqrt2 * omega(p), 1/sqrt2 * omega(p),
+    //                    1/sqrt2 * omega(-p), 1/sqrt2 * omega(-p); // Could probably initiallize all of them at the beginning as a const vector. It would only take D*4*16 bytes of memory, and the compiler could potentially insert the matrix manually instead of searching for it. Only if D is compile time constant
+    evolution_matrix << std::cos(beta/2) * omega(p), - std::sin(beta/2) * std::exp(im*gamma) * omega(p),
+                        std::sin(beta/2) * std::exp(im*alpha) * omega(-p), std::cos(beta/2) * std::exp(im*(alpha+gamma)) * omega(-p);
     unsigned int time_pos = 0;
     const std::complex<double> in_pcoeff = pinstate(p);
     std::complex<double> coeff = 0;
@@ -378,7 +387,7 @@ void parse_unsignedint(const std::string &input, unsigned int &parsed_input) {
     }
 }
 
-int main() {
+void single_multicqw(){
     std::string input;
     std::cout << "Enter the center dimension [101]" << std::endl;
     if (std::cin.peek() != '\n') {
@@ -466,6 +475,46 @@ int main() {
         save_state = true;
     }
     generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,squared_Qfuncs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,calculate_squared_Qfuncs,interaction_pattern);
+}
+
+void batch_coin_operator_multicqw(){
+    const unsigned int n_qubits = 2;
+    const unsigned int qubitstate_size = 1 << n_qubits;
+    const unsigned int max_time = 5000;
+    unsigned int betas_res = 100;
+    unsigned int gammas_res = 100;
+    std::string input = "";
+    std::cout << "Enter the resolution in beta" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,betas_res);
+    input = "";
+    std::cout << "Enter the resolution in gamma" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,gammas_res);
+    const Eigen::VectorXd betas = Eigen::VectorXd::LinSpaced(betas_res, 0, M_PI/2);
+    const Eigen::VectorXd gammas = Eigen::VectorXd::LinSpaced(gammas_res, 0, 2*M_PI);
+    bool save_state = true;
+    bool calculate_qsums = false;
+    bool calculate_probabilities = false;
+    bool calculate_squared_Qfuncs = false;
+    unsigned int interaction_pattern = 1;
+    for (unsigned int b = 0; b < betas_res; b++) {
+        for (unsigned int g = 0; g < gammas_res; g++) {
+            const unsigned int n = b * gammas_res + g;
+            std::string seed_filename = "batch_coins/"+std::to_string(n)+".txt";
+            std::string Qsums_filename = "batch_coins/"+std::to_string(n)+".txt";
+            std::string probs_filename = "batch_coins/"+std::to_string(n)+".txt";
+            std::string output_filename = "batch_coins/"+std::to_string(n)+".txt";
+            std::string squared_Qfuncs_filename = "batch_coins/"+std::to_string(n)+".txt";
+            beta = betas[b];
+            gamma = gammas[g];
+            generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,squared_Qfuncs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,calculate_squared_Qfuncs,interaction_pattern);
+        }
+    }
+}
+
+int main() {
+    batch_coin_operator_multicqw();
     
     // const unsigned int qubits[2] = {9,10};
     // const unsigned int max_time = 5000;

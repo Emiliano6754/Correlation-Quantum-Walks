@@ -6,12 +6,12 @@
 #include "omp.h"
 
 // Calculates the field-wise trace of alpha by calculating its hamming weight and returning the last bit (modulo 2)
-inline unsigned int trace(unsigned int& alpha) {
+inline unsigned int trace(const unsigned int &alpha) {
     return std::popcount(alpha) & 0x1;
 }
 
 // Calculates the trace of the product by doing bitwise and. Equivalent to calling trace(alpha&beta)
-inline unsigned int trace(unsigned int& alpha, unsigned int& beta) {
+inline unsigned int trace(const unsigned int &alpha, const unsigned int &beta) {
     return std::popcount(alpha & beta) & 0x1;
 }
 
@@ -67,9 +67,9 @@ void sym_Qfunc(Eigen::MatrixXd &Qfunc, const unsigned int &n_qubits, const unsig
 }
 
 /* 
-Calculates the squared Q function for state and returns it in Qfunc. 
+Calculates the squared Q function for state and returns it in squared_Qfunc. 
 
-Assumes Qfunc is already shaped adequately. Requires state to be normalized. Else, it returns squarednorm^2 * Q^2(alpha,beta). 
+Assumes squared_Qfunc is already shaped adequately. Requires state to be normalized. Else, it returns squarednorm^2 * Q^2(alpha,beta). 
 Supports max 32 qubits, limited by qubitstate_size and the variables for the loops. Takes in both n_qubits and qubitstate_size to reduce load on main thread
 */
 void sym_squared_Qfunc(Eigen::MatrixXd &squared_Qfunc, const unsigned int &n_qubits, const unsigned int &qubitstate_size, const Eigen::VectorXcd &state) {
