@@ -16,6 +16,7 @@
 #include "omp.h"
 #include "seed_generator.h"
 #include "disc_qfunc.h"
+#include "concurrence.h"
 
 # define M_PI 3.14159265358979323846  /* pi */
 
@@ -99,22 +100,49 @@ void write_state_as_is(const std::vector<Eigen::VectorXcd> &state, const std::st
 }
 
 // Assumes state is of size D, and that a number TimeSize of full qubitstates is compressed in each VectorXcd
-void write_state_reordered(const unsigned int &qubitstate_size, const std::vector<Eigen::VectorXcd> &state, const unsigned int &TimeSize, const std::string &filename) {
+void write_state_reordered(const unsigned int &qubitstate_size, const std::vector<Eigen::VectorXcd> &state, const unsigned int &time_size, const std::string &filename) {
     const std::filesystem::path cwd = std::filesystem::current_path();
     std::ofstream output_file(cwd.string()+"/data/states/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
     if (output_file.is_open()) {
-        for (unsigned int t = 0; t <= TimeSize; t++) {
+        for (unsigned int t = 0; t <= time_size; t++) {
             for (unsigned int m = 0; m < D; m++) {
                 // output_file << m << std::endl;
                 for (unsigned int n = 0; n < qubitstate_size; n++) {
-                    output_file << state[m](t*qubitstate_size + n).real() << "," << state[m](t*qubitstate_size + n).imag() << std::endl;
+                    output_file << state[m](t*qubitstate_size + n).real() << "," << state[m](t*qubitstate_size + n).imag() << "\n";
                 }
             }
         }
+        output_file << std::flush;
     } else {
             std::cout << "Failed to write file" << std::endl;
     }
     output_file.close();
+}
+
+void save_average_concurrences(const Eigen::VectorXd &average_concurrences, const std::string &filename) {
+    const std::filesystem::path cwd = std::filesystem::current_path();
+    std::ofstream output_file(cwd.string()+"/data/concurrences/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
+    Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
+    if (output_file.is_open()) {
+        output_file << average_concurrences.format(FullPrecision) << std::endl;
+    } else {
+        std::cout << "Could not save average concurrences" << std::endl;
+    }
+}
+
+// Does nothing if more than 2 qubits, as concurrence is not relevant for a walk of that kind. Saves average ensemble concurrences as function of time.
+void calculate_save_average_concurrences(const unsigned int &n_qubits, const std::vector<Eigen::VectorXcd> &state, const unsigned int &time_size, const std::string &filename) {
+    if (n_qubits != 2) {
+        std::cout << "Concurrence is only relevant for 2 qubit walks, omitting concurrence calculation" << std::endl;
+        return;
+    }
+    std::vector<Eigen::VectorXd> weighted_concurrences(D,Eigen::VectorXd::Zero(time_size+1));
+    compressed_states_concurrence(state[0],time_size+1,weighted_concurrences[0]);
+    for (unsigned int m = 1; m < D; m++) {
+        compressed_states_concurrence(state[m],time_size+1,weighted_concurrences[m]);
+        weighted_concurrences[0] += weighted_concurrences[m];
+    }
+    save_average_concurrences(weighted_concurrences[0],filename);
 }
 
 // Assumes interaction_counts has been adequately allocated and sized
@@ -173,13 +201,13 @@ inline void evolution_fromt_toT(const unsigned int &n_qubits, const unsigned int
 }
 
 // Transforms state to usual basis. Initializes VectorXcds to the adequate size automatically. Minimum value of D = 2 required. Makes a full copy.
-inline void transform_evolved_state(const std::vector<Eigen::VectorXcd> &pevolved_state, std::vector<Eigen::VectorXcd> &finstate) {
+inline void transform_evolved_state(const std::vector<Eigen::VectorXcd> &pevolved_state, std::vector<Eigen::VectorXcd> &fin_state) {
     const double sqrtDInv = 1/sqrt(D);
     #pragma omp parallel for
     for (unsigned int m = 0; m < D; m++) {
-        finstate[m] = sqrtDInv * pevolved_state[0];
+        fin_state[m] = sqrtDInv * pevolved_state[0];
         for (unsigned int p = 1; p < D; p++) {
-            finstate[m] += sqrtDInv * omega(-int(m*p)) * pevolved_state[p];
+            fin_state[m] += sqrtDInv * omega(-int(m*p)) * pevolved_state[p];
         }
     }
 }
@@ -292,8 +320,7 @@ void save_squared_Qfuncs(const std::vector<Eigen::MatrixXd> &squared_Qfuncs, con
     }
 }
 
-// For now, it just goes from 0 to T stupidly and it doesn't parallelize anything
-inline void generate_and_evolve_seed_toT(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::string &seed_filename, const std::string &Qsums_filename, const std::string &probs_filename, const std::string &squared_Qfuncs_filename, const std::string &output_filename, const bool &save_state, const bool &calculate_qsums, const bool &calculate_probabilities, const unsigned int &calculate_final_Qfuncs, const unsigned int &interaction_pattern) {
+inline void generate_and_evolve_seed_to_T(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::string &seed_filename,const unsigned int &interaction_pattern, std::vector<Eigen::VectorXcd> &fin_state) {
     std::cout << "Generating seed" << std::endl;
     switch(interaction_pattern) {
         case 0:
@@ -318,15 +345,20 @@ inline void generate_and_evolve_seed_toT(const unsigned int &n_qubits, const uns
     std::vector<Eigen::VectorXcd> full_pevolved_state(D);
     evolution_fromt_toT(n_qubits,qubitstate_size,0,T,interaction_seed,fullqubitstates_buffers,full_pevolved_state);
     std::cout << "Transforming state" << std::endl;
-    std::vector<Eigen::VectorXcd> finstate(D);
-    transform_evolved_state(full_pevolved_state,finstate);
+    transform_evolved_state(full_pevolved_state,fin_state);
+}
+
+// For now, it just goes from 0 to T. Should transfer informational prints to their respective functions to declutter
+inline void general_multicqw(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::string &seed_filename, const std::string &Qsums_filename, const std::string &probs_filename, const std::string &squared_Qfuncs_filename, const std::string &output_filename, const bool &save_state, const bool &calculate_qsums, const bool &calculate_probabilities, const unsigned int &calculate_final_Qfuncs, const unsigned int &interaction_pattern) {
+    std::vector<Eigen::VectorXcd> fin_state(D);
+    generate_and_evolve_seed_to_T(n_qubits,qubitstate_size,T,seed_filename,interaction_pattern,fin_state);
     if (calculate_qsums) {
         std::vector<Eigen::VectorXd> Qsums(D);
         if (calculate_probabilities) {
             std::cout << "Calculating sums of Q^2 and probabilities" << std::endl;
             std::vector<Eigen::VectorXd> probs(D);
             auto start = std::chrono::high_resolution_clock::now();
-            calculate_sumofQ2_with_probs(n_qubits,qubitstate_size,finstate,T,Qsums,probs);
+            calculate_sumofQ2_with_probs(n_qubits,qubitstate_size,fin_state,T,Qsums,probs);
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<float> duration = end - start;
             std::cout << "Calculating took " << duration.count() << "s" << std::endl;
@@ -335,7 +367,7 @@ inline void generate_and_evolve_seed_toT(const unsigned int &n_qubits, const uns
             if (calculate_final_Qfuncs) {
                 std::cout << "Calculating final Q^2" << std::endl;
                 std::vector<Eigen::MatrixXd> squared_Qfuncs(D,Eigen::MatrixXd::Zero(qubitstate_size,qubitstate_size));
-                calculate_squared_Qfuncs_at_T(n_qubits,qubitstate_size,T-1,finstate,probs,squared_Qfuncs); // Calculated at T-1, since T is not evaluated
+                calculate_squared_Qfuncs_at_T(n_qubits,qubitstate_size,T-1,fin_state,probs,squared_Qfuncs); // Calculated at T-1, since T is not evaluated
                 average_squared_Qfuncs(squared_Qfuncs);
                 std::cout << "Saving final Q^2" << std::endl;
                 save_squared_Qfuncs(squared_Qfuncs,squared_Qfuncs_filename);
@@ -343,7 +375,7 @@ inline void generate_and_evolve_seed_toT(const unsigned int &n_qubits, const uns
         } else{
             std::cout << "Calculating sums of Q^2" << std::endl;
             auto start = std::chrono::high_resolution_clock::now();
-            calculate_sumofQ2(n_qubits,qubitstate_size,finstate,T,Qsums);
+            calculate_sumofQ2(n_qubits,qubitstate_size,fin_state,T,Qsums);
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<float> duration = end - start;
             std::cout << "Calculating took " << duration.count() << "s" << std::endl;
@@ -355,13 +387,13 @@ inline void generate_and_evolve_seed_toT(const unsigned int &n_qubits, const uns
     } else if (calculate_probabilities) {
         std::vector<Eigen::VectorXd> probs(D);
         std::cout << "Calculating probabilies" << std::endl;
-        calculate_probs(qubitstate_size,T,finstate,probs);
+        calculate_probs(qubitstate_size,T,fin_state,probs);
         std::cout << "Saving probabilies" << std::endl;
         save_probs(probs,probs_filename);
         if (calculate_final_Qfuncs) {
             std::cout << "Calculating final Q^2" << std::endl;
             std::vector<Eigen::MatrixXd> squared_Qfuncs(D,Eigen::MatrixXd::Zero(qubitstate_size,qubitstate_size));
-            calculate_squared_Qfuncs_at_T(n_qubits,qubitstate_size,T-1,finstate,probs,squared_Qfuncs);
+            calculate_squared_Qfuncs_at_T(n_qubits,qubitstate_size,T-1,fin_state,probs,squared_Qfuncs);
             average_squared_Qfuncs(squared_Qfuncs);
             std::cout << "Saving final Q^2" << std::endl;
             save_squared_Qfuncs(squared_Qfuncs,squared_Qfuncs_filename);
@@ -369,7 +401,7 @@ inline void generate_and_evolve_seed_toT(const unsigned int &n_qubits, const uns
     }
     if (save_state) {
         std::cout << "Writing reordered state" << std::endl;
-        write_state_reordered(qubitstate_size,finstate,T,output_filename);
+        write_state_reordered(qubitstate_size,fin_state,T,output_filename);
     }
 }
 
@@ -474,7 +506,7 @@ void single_multicqw(){
     if (input == "yes" || input == "y" || input == "Y") {
         save_state = true;
     }
-    generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,squared_Qfuncs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,calculate_squared_Qfuncs,interaction_pattern);
+    general_multicqw(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,squared_Qfuncs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,calculate_squared_Qfuncs,interaction_pattern);
 }
 
 void batch_coin_operator_multicqw(){
@@ -502,13 +534,12 @@ void batch_coin_operator_multicqw(){
         for (unsigned int g = 0; g < gammas_res; g++) {
             const unsigned int n = b * gammas_res + g;
             std::string seed_filename = "batch_coins/"+std::to_string(n)+".txt";
-            std::string Qsums_filename = "batch_coins/"+std::to_string(n)+".txt";
-            std::string probs_filename = "batch_coins/"+std::to_string(n)+".txt";
-            std::string output_filename = "batch_coins/"+std::to_string(n)+".txt";
-            std::string squared_Qfuncs_filename = "batch_coins/"+std::to_string(n)+".txt";
+            std::string concurrence_filename = "batch_coins/"+std::to_string(n)+".txt";
             beta = betas[b];
             gamma = gammas[g];
-            generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,squared_Qfuncs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,calculate_squared_Qfuncs,interaction_pattern);
+            std::vector<Eigen::VectorXcd> fin_state(D);
+            generate_and_evolve_seed_to_T(n_qubits,qubitstate_size,max_time,seed_filename,interaction_pattern,fin_state);
+            calculate_save_average_concurrences(n_qubits,fin_state,max_time,concurrence_filename);
         }
     }
 }
