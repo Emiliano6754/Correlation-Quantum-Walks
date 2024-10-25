@@ -28,7 +28,7 @@ unsigned int D = 101;
 double w = 2*EIGEN_PI/D;
 const double sqrt2 = sqrt(2);
 const std::complex<double> im(0.0,1.0);
-const Eigen::Vector2cd qubit_instate(std::complex(1.0/sqrt2,0.0),std::complex(0.0,1.0/sqrt2)); // Assumes all qubits are initialized to this state
+Eigen::Vector2cd qubit_instate(std::complex(1.0/sqrt2,0.0),std::complex(0.0,1.0/sqrt2)); // Assumes all qubits are initialized to this state
 Eigen::VectorXcd pinstate = Eigen::VectorXcd::Constant(D,1.0/sqrt(D)); // It also assumes position initialized at |0>
 
 double alpha = 0;
@@ -320,7 +320,7 @@ void save_squared_Qfuncs(const std::vector<Eigen::MatrixXd> &squared_Qfuncs, con
     }
 }
 
-inline void generate_and_evolve_seed_to_T(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::string &seed_filename,const unsigned int &interaction_pattern, std::vector<Eigen::VectorXcd> &fin_state) {
+void generate_and_evolve_seed_to_T(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::string &seed_filename,const unsigned int &interaction_pattern, std::vector<Eigen::VectorXcd> &fin_state) {
     std::cout << "Generating seed" << std::endl;
     switch(interaction_pattern) {
         case 0:
@@ -525,10 +525,6 @@ void batch_coin_operator_multicqw(){
     parse_unsignedint(input,gammas_res);
     const Eigen::VectorXd betas = Eigen::VectorXd::LinSpaced(betas_res, 0, M_PI/2);
     const Eigen::VectorXd gammas = Eigen::VectorXd::LinSpaced(gammas_res, 0, 2*M_PI);
-    bool save_state = true;
-    bool calculate_qsums = false;
-    bool calculate_probabilities = false;
-    bool calculate_squared_Qfuncs = false;
     unsigned int interaction_pattern = 1;
     for (unsigned int b = 0; b < betas_res; b++) {
         for (unsigned int g = 0; g < gammas_res; g++) {
@@ -544,8 +540,40 @@ void batch_coin_operator_multicqw(){
     }
 }
 
+void batch_initial_states_multicqw(){
+    const unsigned int n_qubits = 2;
+    const unsigned int qubitstate_size = 1 << n_qubits;
+    const unsigned int max_time = 5000;
+    unsigned int betas_res = 100;
+    unsigned int thetas_res = 100;
+    std::string input = "";
+    std::cout << "Enter the resolution in beta" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,betas_res);
+    input = "";
+    std::cout << "Enter the resolution in theta" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,thetas_res);
+    const Eigen::VectorXd betas = Eigen::VectorXd::LinSpaced(betas_res, 0, M_PI/2);
+    const Eigen::VectorXd thetas = Eigen::VectorXd::LinSpaced(thetas_res, 0, 2*M_PI);
+    unsigned int interaction_pattern = 1;
+    for (unsigned int b = 0; b < betas_res; b++) {
+        for (unsigned int g = 0; g < thetas_res; g++) {
+            const unsigned int n = b * thetas_res + g;
+            std::string seed_filename = "batch_instates/"+std::to_string(n)+"_2.txt";
+            std::string concurrence_filename = "batch_instates/"+std::to_string(n)+"_2.txt";
+            beta = betas[b];
+            double theta = thetas[g];
+            qubit_instate = Eigen::Vector2cd(std::complex(std::cos(theta),0.0),std::complex(0.0,std::sin(theta))); // cos(theta)|0> + isin(theta)|1>
+            std::vector<Eigen::VectorXcd> fin_state(D);
+            generate_and_evolve_seed_to_T(n_qubits,qubitstate_size,max_time,seed_filename,interaction_pattern,fin_state);
+            calculate_save_average_concurrences(n_qubits,fin_state,max_time,concurrence_filename);
+        }
+    }
+}
+
 int main() {
-    batch_coin_operator_multicqw();
+    batch_initial_states_multicqw();
     
     // const unsigned int qubits[2] = {9,10};
     // const unsigned int max_time = 5000;
