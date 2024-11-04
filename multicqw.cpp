@@ -137,12 +137,32 @@ void calculate_save_average_concurrences(const unsigned int &n_qubits, const std
         return;
     }
     std::vector<Eigen::VectorXd> weighted_concurrences(D,Eigen::VectorXd::Zero(time_size+1));
-    compressed_states_concurrence(state[0],time_size+1,weighted_concurrences[0]);
-    for (unsigned int m = 1; m < D; m++) {
+    #pragma omp parallel for
+    for (unsigned int m = 0; m < D; m++) {
         compressed_states_concurrence(state[m],time_size+1,weighted_concurrences[m]);
+    }
+
+    for (unsigned int m = 1; m < D; m++) {
         weighted_concurrences[0] += weighted_concurrences[m];
     }
     save_average_concurrences(weighted_concurrences[0],filename);
+}
+
+double steady_ensemble_concurrence(const unsigned int &n_qubits, const std::vector<Eigen::VectorXcd> &state, const unsigned int &time_size) {
+    if (n_qubits != 2) {
+        std::cout << "Concurrence is only relevant for 2 qubit walks, omitting concurrence calculation" << std::endl;
+        return 0;
+    }
+    std::vector<Eigen::VectorXd> weighted_concurrences(D,Eigen::VectorXd::Zero(time_size+1));
+    #pragma omp parallel for
+    for (unsigned int m = 0; m < D; m++) {
+        compressed_states_concurrence(state[m],time_size+1,weighted_concurrences[m]);
+    }
+
+    for (unsigned int m = 1; m < D; m++) {
+        weighted_concurrences[0] += weighted_concurrences[m];
+    }
+    return weighted_concurrences[0].mean();
 }
 
 // Assumes interaction_counts has been adequately allocated and sized
@@ -212,7 +232,7 @@ inline void transform_evolved_state(const std::vector<Eigen::VectorXcd> &pevolve
     }
 }
 
-// Calculates all sums of Q^2 and returns P(m)*sum Q^2 in Qsums, with shape (D,steps_taken). Assumes Qsums already contains the correct number of vectors, but initializes each vector to a steps_taken number of 0s. Can be parallelized by taking each m independently. Maybe could be optimized changind Qsums to an Eigen matrix/vectors.
+// Calculates all sums of Q^2 and returns P(m)*sum Q^2 in Qsums, with shape (D,steps_taken). Assumes Qsums already contains the correct number of vectors, but initializes each vector to a steps_taken number of 0s. Can be parallelized by taking each m independently. Maybe could be optimized changing Qsums to an Eigen matrix/vectors.
 inline void calculate_sumofQ2(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const std::vector<Eigen::VectorXcd> &full_state, const unsigned int &steps_taken, std::vector<Eigen::VectorXd> &Qsums) {
     for (unsigned int m = 0; m < D; m++) {
         Qsums[m] = Eigen::VectorXd::Zero(steps_taken);
@@ -320,7 +340,18 @@ void save_squared_Qfuncs(const std::vector<Eigen::MatrixXd> &squared_Qfuncs, con
     }
 }
 
-void generate_and_evolve_seed_to_T(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::string &seed_filename,const unsigned int &interaction_pattern, std::vector<Eigen::VectorXcd> &fin_state) {
+void evolve_seed_to_T(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T,const std::vector<unsigned int> &interaction_seed, std::vector<Eigen::VectorXcd> &fin_state) {
+    std::cout << "Initializing qubits" << std::endl;
+    std::vector<std::vector<Eigen::Vector2cd>> fullqubitstates_buffers(D);
+    initialize_qubitstates_buffer(n_qubits,0,interaction_seed,fullqubitstates_buffers);
+    std::cout << "Evolving state" << std::endl;
+    std::vector<Eigen::VectorXcd> full_pevolved_state(D);
+    evolution_fromt_toT(n_qubits,qubitstate_size,0,T,interaction_seed,fullqubitstates_buffers,full_pevolved_state);
+    std::cout << "Transforming state" << std::endl;
+    transform_evolved_state(full_pevolved_state,fin_state);
+}
+
+void generate_seed_to_T(const unsigned int &n_qubits, const unsigned int &T, const std::string &seed_filename,const unsigned int &interaction_pattern, std::vector<unsigned int> &interaction_seed) {
     std::cout << "Generating seed" << std::endl;
     switch(interaction_pattern) {
         case 0:
@@ -335,17 +366,15 @@ void generate_and_evolve_seed_to_T(const unsigned int &n_qubits, const unsigned 
         case 3:
             generate_completely_biased_seed(n_qubits,T,seed_filename);
     }
-    std::vector<unsigned int> interaction_seed(T);
     std::cout << "Parsing seed" << std::endl;
     parse_interaction_seed(seed_filename,0,T,interaction_seed);
-    std::cout << "Initializing qubits" << std::endl;
-    std::vector<std::vector<Eigen::Vector2cd>> fullqubitstates_buffers(D);
-    initialize_qubitstates_buffer(n_qubits,0,interaction_seed,fullqubitstates_buffers);
-    std::cout << "Evolving state" << std::endl;
-    std::vector<Eigen::VectorXcd> full_pevolved_state(D);
-    evolution_fromt_toT(n_qubits,qubitstate_size,0,T,interaction_seed,fullqubitstates_buffers,full_pevolved_state);
-    std::cout << "Transforming state" << std::endl;
-    transform_evolved_state(full_pevolved_state,fin_state);
+}
+
+void generate_and_evolve_seed_to_T(const unsigned int &n_qubits, const unsigned int &qubitstate_size, const unsigned int &T, const std::string &seed_filename,const unsigned int &interaction_pattern, std::vector<Eigen::VectorXcd> &fin_state) {
+    std::vector<unsigned int> interaction_seed(T);
+    generate_seed_to_T(n_qubits,T,seed_filename,interaction_pattern,interaction_seed);
+    
+    evolve_seed_to_T(n_qubits,qubitstate_size,T,interaction_seed,fin_state);
 }
 
 // For now, it just goes from 0 to T. Should transfer informational prints to their respective functions to declutter
@@ -512,9 +541,10 @@ void single_multicqw(){
 void batch_coin_operator_multicqw(){
     const unsigned int n_qubits = 2;
     const unsigned int qubitstate_size = 1 << n_qubits;
-    const unsigned int max_time = 5000;
+    const unsigned int max_time = 10000;
     unsigned int betas_res = 100;
     unsigned int gammas_res = 100;
+    unsigned int interaction_pattern = 0;
     std::string input = "";
     std::cout << "Enter the resolution in beta" << std::endl;
     std::cin >> input;
@@ -523,27 +553,73 @@ void batch_coin_operator_multicqw(){
     std::cout << "Enter the resolution in gamma" << std::endl;
     std::cin >> input;
     parse_unsignedint(input,gammas_res);
-    const Eigen::VectorXd betas = Eigen::VectorXd::LinSpaced(betas_res, 0, M_PI/2);
-    const Eigen::VectorXd gammas = Eigen::VectorXd::LinSpaced(gammas_res, 0, 2*M_PI);
-    unsigned int interaction_pattern = 1;
+    input = "";
+    std::cout << "Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,interaction_pattern);
+    Eigen::VectorXd betas;
+    Eigen::VectorXd gammas;
+    std::string suffix = "";
+    if (betas_res > 1) {
+        betas = Eigen::VectorXd::LinSpaced(betas_res, 0, M_PI/2);
+    } else {
+        betas = Eigen::VectorXd::LinSpaced(1, M_PI/2, M_PI/2); // For full resolution in gamma
+        suffix = "_gamma";
+    }
+    if (gammas_res > 1) {
+        gammas = Eigen::VectorXd::LinSpaced(gammas_res, 0, 2*M_PI);
+    } else {
+        gammas = Eigen::VectorXd::LinSpaced(1, M_PI, M_PI); // For full resolution in beta
+        suffix = "_beta";
+    }
+    if (betas_res == 1 && gammas_res == 1) {
+        suffix = "optimal_coin";
+    }
+    switch(interaction_pattern) {
+        case 0:
+            suffix = suffix + "_r";
+            break;
+        case 1:
+            suffix = suffix + "_o";
+            break;
+        case 2:
+            suffix = suffix + "_b";
+            break;
+        case 3:
+            suffix = suffix + "_b";
+    }
+    std::string seed_filename = "batch_coins/random_seed.txt";
+    unsigned int generate_seed = 0;
+    input = "";
+    std::cout << "Generate new seed? (0 = no, 1 = yes)" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,generate_seed);
+    std::vector<unsigned int> interaction_seed(max_time);
+    switch(generate_seed) {
+        case 0:
+            parse_interaction_seed(seed_filename,0,max_time,interaction_seed);
+            break;
+        case 1:
+            generate_seed_to_T(n_qubits,max_time,seed_filename,interaction_pattern,interaction_seed);
+            break;
+    }
     for (unsigned int b = 0; b < betas_res; b++) {
         for (unsigned int g = 0; g < gammas_res; g++) {
             const unsigned int n = b * gammas_res + g;
-            std::string seed_filename = "batch_coins/"+std::to_string(n)+".txt";
-            std::string concurrence_filename = "batch_coins/"+std::to_string(n)+".txt";
+            std::string concurrence_filename = "batch_coins/"+std::to_string(n)+suffix+".txt";
             beta = betas[b];
             gamma = gammas[g];
             std::vector<Eigen::VectorXcd> fin_state(D);
-            generate_and_evolve_seed_to_T(n_qubits,qubitstate_size,max_time,seed_filename,interaction_pattern,fin_state);
+            evolve_seed_to_T(n_qubits,qubitstate_size,max_time,interaction_seed,fin_state);
             calculate_save_average_concurrences(n_qubits,fin_state,max_time,concurrence_filename);
         }
     }
 }
 
-void batch_initial_states_multicqw(){
+void batch_initial_states_coins_multicqw(){
     const unsigned int n_qubits = 2;
     const unsigned int qubitstate_size = 1 << n_qubits;
-    const unsigned int max_time = 5000;
+    const unsigned int max_time = 10000;
     unsigned int betas_res = 100;
     unsigned int thetas_res = 100;
     std::string input = "";
@@ -560,8 +636,8 @@ void batch_initial_states_multicqw(){
     for (unsigned int b = 0; b < betas_res; b++) {
         for (unsigned int g = 0; g < thetas_res; g++) {
             const unsigned int n = b * thetas_res + g;
-            std::string seed_filename = "batch_instates/"+std::to_string(n)+"_2.txt";
-            std::string concurrence_filename = "batch_instates/"+std::to_string(n)+"_2.txt";
+            std::string seed_filename = "batch_instates_coin/"+std::to_string(n)+".txt";
+            std::string concurrence_filename = "batch_instates_coin/"+std::to_string(n)+".txt";
             beta = betas[b];
             double theta = thetas[g];
             qubit_instate = Eigen::Vector2cd(std::complex(std::cos(theta),0.0),std::complex(0.0,std::sin(theta))); // cos(theta)|0> + isin(theta)|1>
@@ -572,7 +648,116 @@ void batch_initial_states_multicqw(){
     }
 }
 
+void save_steady_concurrences(Eigen::VectorXd &steady_concurrences,std::string &filename) {
+    const std::filesystem::path cwd = std::filesystem::current_path();
+    std::ofstream output_file(cwd.string()+"/data/concurrences/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
+    Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
+    if (output_file.is_open()) {
+        output_file << steady_concurrences.format(FullPrecision);
+    } else {
+        std::cout << "Could not save steady concurrences" << std::endl;
+    }
+}
+
+void batch_initial_states_multicqw(){
+    const unsigned int n_qubits = 2;
+    const unsigned int qubitstate_size = 1 << n_qubits;
+    const unsigned int max_time = 10000;
+    unsigned int thetas_res = 100;
+    unsigned int phis_res = 100;
+    unsigned int interaction_pattern = 0;
+    std::string input = "";
+    std::cout << "Enter the resolution in theta" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,thetas_res);
+    input = "";
+    std::cout << "Enter the resolution in phi" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,phis_res);
+    input = "";
+    std::cout << "Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,interaction_pattern);
+    Eigen::VectorXd thetas;
+    Eigen::VectorXd phis;
+    std::string suffix = "";
+    if (thetas_res > 1) {
+        thetas = Eigen::VectorXd::LinSpaced(thetas_res, 0, 2*M_PI);
+    } else {
+        thetas = Eigen::VectorXd::LinSpaced(1, M_PI/4, M_PI/4); // For full resolution in phi
+        suffix = "_phi";
+    }
+    if (phis_res > 1) {
+        phis = Eigen::VectorXd::LinSpaced(phis_res, 0, 2*M_PI);
+    }
+    else {
+        phis = Eigen::VectorXd::LinSpaced(1, M_PI/2, M_PI/2); // For full resolution in theta
+        suffix = "_theta";
+    }
+    if (thetas_res == 1 && phis_res == 1) {
+        suffix = "optimal_state";
+    }
+    std::string seed_filename = "";
+    switch(interaction_pattern) {
+        case 0:
+            suffix = suffix + "_r";
+            seed_filename = "batch_instates/random_seed.txt";
+            break;
+        case 1:
+            seed_filename = "batch_instates/ordered_seed.txt";
+            suffix = suffix + "_o";
+            break;
+        case 2:
+        case 3:
+            seed_filename = "batch_instates/biased_seed.txt";
+            suffix = suffix + "_b";
+    }
+    unsigned int generate_seed = 0;
+    input = "";
+    std::cout << "Generate new seed? (0 = no, 1 = yes)" << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,generate_seed);
+    std::vector<unsigned int> interaction_seed(max_time);
+    std::string concurrences_filename = "batch_instates/concurrences"+suffix+".txt";
+    switch(generate_seed) {
+        case 0:
+            parse_interaction_seed(seed_filename,0,max_time,interaction_seed);
+            break;
+        case 1:
+            generate_seed_to_T(n_qubits,max_time,seed_filename,interaction_pattern,interaction_seed);
+            break;
+    }
+    Eigen::VectorXd steady_concurrences = Eigen::VectorXd::Zero(thetas_res*phis_res);
+    for (unsigned int j = 0; j < thetas_res; j++) {
+        for (unsigned int k = 0; k < phis_res; k++) {
+            const unsigned int n = j * phis_res + k;
+            double theta = thetas[j];
+            double phi = phis[k];
+            qubit_instate = Eigen::Vector2cd(std::cos(theta),std::sin(theta)*std::complex(std::cos(phi),std::sin(phi))); // cos(theta)|0> + sin(theta)e^(iphi)|1>
+            std::vector<Eigen::VectorXcd> fin_state(D);
+            evolve_seed_to_T(n_qubits,qubitstate_size,max_time,interaction_seed,fin_state);
+            steady_concurrences[n] = steady_ensemble_concurrence(n_qubits,fin_state,max_time);
+        }
+    }
+    save_steady_concurrences(steady_concurrences,concurrences_filename);
+}
+
 int main() {
+    // const unsigned int n_qubits = 2;
+    // const unsigned int qubitstate_size = 1 << n_qubits;
+    // const unsigned int max_time = 10000;
+    // std::string seed_filename = "batch_instates/random_seed.txt";
+    // std::vector<unsigned int> interaction_seed(max_time);
+    // parse_interaction_seed(seed_filename,0,max_time,interaction_seed);
+    // std::string Qsums_filename = "seed_qsum.txt";
+    // std::vector<Eigen::VectorXcd> fin_state(D);
+    // evolve_seed_to_T(n_qubits,qubitstate_size,max_time,interaction_seed,fin_state);
+    // std::vector<Eigen::VectorXd> Qsums(D);
+    // calculate_sumofQ2(n_qubits,qubitstate_size,fin_state,max_time,Qsums);
+    // average_sumofQ2(Qsums);
+    // std::cout << "Writing average sums of Q^2" << std::endl;
+    // save_sums(Qsums[0],Qsums_filename);
+
     batch_initial_states_multicqw();
     
     // const unsigned int qubits[2] = {9,10};
