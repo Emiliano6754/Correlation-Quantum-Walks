@@ -17,12 +17,20 @@
 #include "seed_generator.h"
 #include "disc_qfunc.h"
 #include "concurrence.h"
+#include <nlopt.hpp>
 
 # define M_PI 3.14159265358979323846  /* pi */
 
 // Consider compiling with  -O3 -ffast-math to optimize powers
 
 // Cap of 28 qubits for sure, unless unsigned int in qubitstate_size and related are changed for unsigned long
+
+struct opt_params {
+    unsigned int n_qubits;
+    unsigned int qubitstate_size;
+    unsigned int max_time;
+    std::vector<unsigned int> interaction_seed;
+};
 
 unsigned int D = 101;
 double w = 2*EIGEN_PI/D;
@@ -165,6 +173,17 @@ double steady_ensemble_concurrence(const unsigned int &n_qubits, const std::vect
     return weighted_concurrences[0].mean();
 }
 
+void save_steady_concurrences(Eigen::VectorXd &steady_concurrences,const std::string &filename) {
+    const std::filesystem::path cwd = std::filesystem::current_path();
+    std::ofstream output_file(cwd.string()+"/data/concurrences/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
+    Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
+    if (output_file.is_open()) {
+        output_file << steady_concurrences.format(FullPrecision);
+    } else {
+        std::cout << "Could not save steady concurrences" << std::endl;
+    }
+}
+
 // Assumes interaction_counts has been adequately allocated and sized
 inline void count_interactions(const unsigned int &n_qubits, Eigen::Matrix<unsigned int, Eigen::Dynamic, Eigen::Dynamic> &interaction_counts, const std::vector<unsigned int> &interaction_seed, const unsigned int max_time) {
     for (unsigned int n = 0; n < n_qubits; n++) {
@@ -223,7 +242,7 @@ inline void evolution_fromt_toT(const unsigned int &n_qubits, const unsigned int
 // Transforms state to usual basis. Initializes VectorXcds to the adequate size automatically. Minimum value of D = 2 required. Makes a full copy.
 inline void transform_evolved_state(const std::vector<Eigen::VectorXcd> &pevolved_state, std::vector<Eigen::VectorXcd> &fin_state) {
     const double sqrtDInv = 1/sqrt(D);
-    #pragma omp parallel for
+    #pragma omp parallel for simd
     for (unsigned int m = 0; m < D; m++) {
         fin_state[m] = sqrtDInv * pevolved_state[0];
         for (unsigned int p = 1; p < D; p++) {
@@ -448,6 +467,37 @@ void parse_unsignedint(const std::string &input, unsigned int &parsed_input) {
     }
 }
 
+void ask_for_uint(const std::string message, unsigned int &output) {
+    std::string input = "";
+    std::cout << message << std::endl;
+    std::cin >> input;
+    parse_unsignedint(input,output);
+}
+
+void ask_for_uint(const std::string message, unsigned int &output, const unsigned int &def) {
+    std::string input;
+    std::cout << message << " [" << def << "]" << std::endl;
+    if (std::cin.peek() != '\n') {
+        std::cin >> input;
+        parse_unsignedint(input,output);
+    } else {
+        output = def;
+    }
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+}
+
+void ask_for_pimult(const std::string message, double &output, const double &frac_def) {
+    double frac;
+    std::cout << message << " [" << frac_def << "]" << std::endl;
+    if (std::cin.peek() != '\n') {
+        std::cin >> frac;
+        output = frac * M_PI;
+    } else {
+        output = frac_def * M_PI;
+    }
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+}
+
 void single_multicqw(){
     std::string input;
     std::cout << "Enter the center dimension [101]" << std::endl;
@@ -538,6 +588,71 @@ void single_multicqw(){
     general_multicqw(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,squared_Qfuncs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,calculate_squared_Qfuncs,interaction_pattern);
 }
 
+void name_interaction_seed(const unsigned int &interaction_pattern, std::string &suffix, std::string &seed_filename) {
+    switch(interaction_pattern) {
+        case 0:
+            suffix = suffix + "_r";
+            seed_filename = "random_seed.txt";
+            break;
+        case 1:
+            seed_filename = "ordered_seed.txt";
+            suffix = suffix + "_o";
+            break;
+        case 2:
+        case 3:
+            seed_filename = "biased_seed.txt";
+            suffix = suffix + "_b";
+    }
+}
+
+void generate_or_parse_seed(const unsigned int &n_qubits, const std::string &save_file, const unsigned int &max_time, const unsigned int &interaction_pattern, std::vector<unsigned int> &interaction_seed) {
+    unsigned int generate_seed = 0;
+    ask_for_uint("Generate new seed? (0 = no, 1 = yes)",generate_seed,0);
+    switch(generate_seed) {
+        case 0:
+            parse_interaction_seed(save_file,0,max_time,interaction_seed);
+            break;
+        case 1:
+            generate_seed_to_T(n_qubits,max_time,save_file,interaction_pattern,interaction_seed);
+            break;
+    }
+}
+
+void set_angles_pattern(unsigned int &interaction_pattern) {
+    double theta = M_PI/4;
+    double phi = M_PI/2;
+    ask_for_pimult("Enter beta as fraction of pi",beta,0.5);
+    ask_for_pimult("Enter gamma as fraction of pi",gamma,1.0);
+    ask_for_pimult("Enter theta as fraction of pi",theta,0.25);
+    ask_for_pimult("Enter phi as fraction of pi",phi,0.5);
+    qubit_instate = Eigen::Vector2cd(std::cos(theta),std::sin(theta)*std::complex(std::cos(phi),std::sin(phi)));
+    ask_for_uint("Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)",interaction_pattern,0);
+}
+
+void angle_renyi_multicqw(){
+    const unsigned int n_qubits = 2;
+    const unsigned int qubitstate_size = 1 << n_qubits;
+    const unsigned int max_time = 10000;
+    unsigned int interaction_pattern = 0;
+    std::string saves_path = "angles/";
+    std::string seed_path = "batch_instates/";
+    double theta = M_PI/4;
+    double phi = M_PI/2;
+    set_angles_pattern(interaction_pattern);
+    std::string Qsums_filename = "("+std::to_string(beta)+","+std::to_string(gamma)+","+std::to_string(theta)+","+std::to_string(phi)+").txt"; // Only really good for manual one by one calculations
+    std::string seed_filename;
+    std::string suffix;
+    name_interaction_seed(interaction_pattern,suffix,seed_filename);
+    std::vector<unsigned int> interaction_seed(max_time);
+    generate_or_parse_seed(n_qubits,seed_path+seed_filename,max_time,interaction_pattern,interaction_seed);
+    std::vector<Eigen::VectorXcd> fin_state(D);
+    evolve_seed_to_T(n_qubits,qubitstate_size,max_time,interaction_seed,fin_state);
+    std::vector<Eigen::VectorXd> Qsums(D);
+    calculate_sumofQ2(n_qubits,qubitstate_size,fin_state,max_time,Qsums);
+    average_sumofQ2(Qsums);
+    save_sums(Qsums[0],saves_path+Qsums_filename);
+}
+
 void batch_coin_operator_multicqw(){
     const unsigned int n_qubits = 2;
     const unsigned int qubitstate_size = 1 << n_qubits;
@@ -545,18 +660,14 @@ void batch_coin_operator_multicqw(){
     unsigned int betas_res = 100;
     unsigned int gammas_res = 100;
     unsigned int interaction_pattern = 0;
-    std::string input = "";
-    std::cout << "Enter the resolution in beta" << std::endl;
-    std::cin >> input;
-    parse_unsignedint(input,betas_res);
-    input = "";
-    std::cout << "Enter the resolution in gamma" << std::endl;
-    std::cin >> input;
-    parse_unsignedint(input,gammas_res);
-    input = "";
-    std::cout << "Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)" << std::endl;
-    std::cin >> input;
-    parse_unsignedint(input,interaction_pattern);
+    ask_for_uint("Enter the resolution in beta",betas_res,100);
+    ask_for_uint("Enter the resolution in gamma",gammas_res,100);
+    ask_for_uint("Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)",interaction_pattern,0);
+    
+    double theta = 3*M_PI/8; // Set initial state
+    double phi = M_PI/2;
+    qubit_instate = Eigen::Vector2cd(std::cos(theta),std::sin(theta)*std::complex(std::cos(phi),std::sin(phi))); // cos(theta)|0> + sin(theta)e^(iphi)|1>
+
     Eigen::VectorXd betas;
     Eigen::VectorXd gammas;
     std::string suffix = "";
@@ -568,41 +679,22 @@ void batch_coin_operator_multicqw(){
     }
     if (gammas_res > 1) {
         gammas = Eigen::VectorXd::LinSpaced(gammas_res, 0, 2*M_PI);
+        gammas[std::round(gammas_res/4)] = M_PI/2; // Ensure gamma passes through pi/2 for the optimal coin
     } else {
-        gammas = Eigen::VectorXd::LinSpaced(1, M_PI, M_PI); // For full resolution in beta
+        gammas = Eigen::VectorXd::LinSpaced(1, M_PI/2, M_PI/2); // For full resolution in beta
         suffix = "_beta";
     }
     if (betas_res == 1 && gammas_res == 1) {
         suffix = "optimal_coin";
     }
-    switch(interaction_pattern) {
-        case 0:
-            suffix = suffix + "_r";
-            break;
-        case 1:
-            suffix = suffix + "_o";
-            break;
-        case 2:
-            suffix = suffix + "_b";
-            break;
-        case 3:
-            suffix = suffix + "_b";
-    }
-    std::string seed_filename = "batch_coins/random_seed.txt";
-    unsigned int generate_seed = 0;
-    input = "";
-    std::cout << "Generate new seed? (0 = no, 1 = yes)" << std::endl;
-    std::cin >> input;
-    parse_unsignedint(input,generate_seed);
+    std::string seed_filename = "";
+    name_interaction_seed(interaction_pattern,suffix,seed_filename);
     std::vector<unsigned int> interaction_seed(max_time);
-    switch(generate_seed) {
-        case 0:
-            parse_interaction_seed(seed_filename,0,max_time,interaction_seed);
-            break;
-        case 1:
-            generate_seed_to_T(n_qubits,max_time,seed_filename,interaction_pattern,interaction_seed);
-            break;
-    }
+    std::string concurrences_filename = "concurrences"+suffix+".txt";
+    std::string saves_path = "batch_coins/";
+    generate_or_parse_seed(n_qubits,saves_path+seed_filename,max_time,interaction_pattern,interaction_seed);
+
+    Eigen::VectorXd steady_concurrences = Eigen::VectorXd::Zero(betas_res*gammas_res);
     for (unsigned int b = 0; b < betas_res; b++) {
         for (unsigned int g = 0; g < gammas_res; g++) {
             const unsigned int n = b * gammas_res + g;
@@ -611,9 +703,10 @@ void batch_coin_operator_multicqw(){
             gamma = gammas[g];
             std::vector<Eigen::VectorXcd> fin_state(D);
             evolve_seed_to_T(n_qubits,qubitstate_size,max_time,interaction_seed,fin_state);
-            calculate_save_average_concurrences(n_qubits,fin_state,max_time,concurrence_filename);
+            steady_concurrences[n] = steady_ensemble_concurrence(n_qubits,fin_state,max_time);
         }
     }
+    save_steady_concurrences(steady_concurrences,saves_path+concurrences_filename);
 }
 
 void batch_initial_states_coins_multicqw(){
@@ -648,43 +741,25 @@ void batch_initial_states_coins_multicqw(){
     }
 }
 
-void save_steady_concurrences(Eigen::VectorXd &steady_concurrences,std::string &filename) {
-    const std::filesystem::path cwd = std::filesystem::current_path();
-    std::ofstream output_file(cwd.string()+"/data/concurrences/"+filename,std::ofstream::out|std::ofstream::ate|std::ofstream::trunc);
-    Eigen::IOFormat FullPrecision(Eigen::FullPrecision,0,"\n");
-    if (output_file.is_open()) {
-        output_file << steady_concurrences.format(FullPrecision);
-    } else {
-        std::cout << "Could not save steady concurrences" << std::endl;
-    }
-}
-
 void batch_initial_states_multicqw(){
     const unsigned int n_qubits = 2;
     const unsigned int qubitstate_size = 1 << n_qubits;
-    const unsigned int max_time = 10000;
+    const unsigned int max_time = 5000;
     unsigned int thetas_res = 100;
     unsigned int phis_res = 100;
+    beta = M_PI/2;
+    gamma = M_PI/2; // Optimal coin for |0>_y
     unsigned int interaction_pattern = 0;
-    std::string input = "";
-    std::cout << "Enter the resolution in theta" << std::endl;
-    std::cin >> input;
-    parse_unsignedint(input,thetas_res);
-    input = "";
-    std::cout << "Enter the resolution in phi" << std::endl;
-    std::cin >> input;
-    parse_unsignedint(input,phis_res);
-    input = "";
-    std::cout << "Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)" << std::endl;
-    std::cin >> input;
-    parse_unsignedint(input,interaction_pattern);
+    ask_for_uint("Enter the resolution in theta",thetas_res,100);
+    ask_for_uint("Enter the resolution in phi",phis_res,100);
+    ask_for_uint("Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)",interaction_pattern,0);
     Eigen::VectorXd thetas;
     Eigen::VectorXd phis;
     std::string suffix = "";
     if (thetas_res > 1) {
         thetas = Eigen::VectorXd::LinSpaced(thetas_res, 0, 2*M_PI);
     } else {
-        thetas = Eigen::VectorXd::LinSpaced(1, M_PI/4, M_PI/4); // For full resolution in phi
+        thetas = Eigen::VectorXd::LinSpaced(1, 3*M_PI/8, 3*M_PI/8); // For full resolution in phi
         suffix = "_phi";
     }
     if (phis_res > 1) {
@@ -697,36 +772,14 @@ void batch_initial_states_multicqw(){
     if (thetas_res == 1 && phis_res == 1) {
         suffix = "optimal_state";
     }
+    // suffix = suffix + "_1001";
     std::string seed_filename = "";
-    switch(interaction_pattern) {
-        case 0:
-            suffix = suffix + "_r";
-            seed_filename = "batch_instates/random_seed.txt";
-            break;
-        case 1:
-            seed_filename = "batch_instates/ordered_seed.txt";
-            suffix = suffix + "_o";
-            break;
-        case 2:
-        case 3:
-            seed_filename = "batch_instates/biased_seed.txt";
-            suffix = suffix + "_b";
-    }
-    unsigned int generate_seed = 0;
-    input = "";
-    std::cout << "Generate new seed? (0 = no, 1 = yes)" << std::endl;
-    std::cin >> input;
-    parse_unsignedint(input,generate_seed);
+    name_interaction_seed(interaction_pattern,suffix,seed_filename);
     std::vector<unsigned int> interaction_seed(max_time);
-    std::string concurrences_filename = "batch_instates/concurrences"+suffix+".txt";
-    switch(generate_seed) {
-        case 0:
-            parse_interaction_seed(seed_filename,0,max_time,interaction_seed);
-            break;
-        case 1:
-            generate_seed_to_T(n_qubits,max_time,seed_filename,interaction_pattern,interaction_seed);
-            break;
-    }
+    std::string concurrences_filename = "concurrences"+suffix+".txt";
+    std::string saves_path = "batch_instates/";
+    generate_or_parse_seed(n_qubits,saves_path+seed_filename,max_time,interaction_pattern,interaction_seed);
+
     Eigen::VectorXd steady_concurrences = Eigen::VectorXd::Zero(thetas_res*phis_res);
     for (unsigned int j = 0; j < thetas_res; j++) {
         for (unsigned int k = 0; k < phis_res; k++) {
@@ -739,47 +792,203 @@ void batch_initial_states_multicqw(){
             steady_concurrences[n] = steady_ensemble_concurrence(n_qubits,fin_state,max_time);
         }
     }
-    save_steady_concurrences(steady_concurrences,concurrences_filename);
+    save_steady_concurrences(steady_concurrences,saves_path+concurrences_filename);
+}
+
+// angles = (beta,gamma,theta,phi)
+double angle_concurrence(const std::vector<double> &angles,std::vector<double> &grad, void* f_data) {
+    opt_params* params = static_cast<opt_params*>(f_data);
+    std::vector<Eigen::VectorXcd> fin_state(D);
+    beta = angles[0];
+    gamma = angles[1];
+    qubit_instate = Eigen::Vector2cd(std::cos(angles[2]),std::sin(angles[2])*std::complex(std::cos(angles[3]),std::sin(angles[3])));
+    evolve_seed_to_T(params->n_qubits,params->qubitstate_size,params->max_time,params->interaction_seed,fin_state);
+    return steady_ensemble_concurrence(params->n_qubits,fin_state,params->max_time);
+}
+
+// angles = (beta,gamma)
+double state_concurrence(const std::vector<double> &angles,std::vector<double> &grad, void* f_data) {
+    opt_params* params = static_cast<opt_params*>(f_data);
+    std::vector<Eigen::VectorXcd> fin_state(D);
+    beta = angles[0];
+    gamma = angles[1];
+    evolve_seed_to_T(params->n_qubits,params->qubitstate_size,params->max_time,params->interaction_seed,fin_state);
+    return steady_ensemble_concurrence(params->n_qubits,fin_state,params->max_time);
+}
+
+void optimize_state_concurrence() {
+    const unsigned int n_qubits = 2;
+    const unsigned int qubitstate_size = 1 << n_qubits;
+    const unsigned int max_time = 10000;
+    double theta;
+    double phi;
+    ask_for_pimult("Enter theta as fraction of pi",theta,0.25);
+    ask_for_pimult("Enter phi as fraction of pi",phi,0.5);
+    qubit_instate = Eigen::Vector2cd(std::cos(theta),std::sin(theta)*std::complex(std::cos(phi),std::sin(phi)));
+
+    unsigned int interaction_pattern = 0;
+    std::string seed_filename = "";
+    std::string seed_path = "batch_instates/";
+    std::string suffix = "";
+    std::vector<unsigned int> interaction_seed(max_time+1);
+    ask_for_uint("Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)",interaction_pattern,0);
+    name_interaction_seed(interaction_pattern,suffix,seed_filename);
+    generate_or_parse_seed(n_qubits,seed_path+seed_filename,max_time,interaction_pattern,interaction_seed);
+
+    opt_params params = opt_params(n_qubits,qubitstate_size,max_time,interaction_seed);
+    nlopt::opt opt(nlopt::G_MLSL_LDS,2);
+    opt.set_local_optimizer(nlopt::opt(nlopt::LN_COBYLA,2));
+    opt.set_max_objective(state_concurrence,&params);
+    std::vector<double> upper_bounds(2,M_PI);
+    upper_bounds[0] = M_PI/2;
+    const std::vector<double> lower_bounds(2,0.0);
+    opt.set_upper_bounds(upper_bounds);
+    opt.set_lower_bounds(lower_bounds);
+    opt.set_maxtime(600);
+    opt.set_ftol_abs(0.005);
+    std::vector<double> guess(2,M_PI/2);
+    double max_conc = 0;
+    try {
+        nlopt::result result = opt.optimize(guess,max_conc);
+        std::cout << max_conc << " at (" << guess[0] << ", " << guess[1] << ")\n";
+    }
+    catch (std::runtime_error &e) {
+        std::cerr << "Optimization failed: " << e.what() << "\n";
+        std::cerr << "Best value before failure: " << max_conc << " at (" << guess[0] << ", " << guess[1] << ")\n";
+    }
+}
+
+void optimize_angle_concurrence() {
+    const unsigned int n_qubits = 2;
+    const unsigned int qubitstate_size = 1 << n_qubits;
+    const unsigned int max_time = 10000;
+    unsigned int interaction_pattern = 0;
+    std::string seed_filename = "";
+    std::string seed_path = "batch_instates/";
+    std::string suffix = "";
+    std::vector<unsigned int> interaction_seed(max_time+1);
+    ask_for_uint("Enter the interaction pattern (0 = random, 1 = ordered, 2 = 3 = biased)",interaction_pattern,0);
+    name_interaction_seed(interaction_pattern,suffix,seed_filename);
+    generate_or_parse_seed(n_qubits,seed_path+seed_filename,max_time,interaction_pattern,interaction_seed);
+    opt_params params = opt_params(n_qubits,qubitstate_size,max_time,interaction_seed);
+    nlopt::opt opt(nlopt::G_MLSL_LDS,4); 
+    opt.set_local_optimizer(nlopt::opt(nlopt::LN_COBYLA,4));
+    opt.set_max_objective(angle_concurrence,&params);
+    std::vector<double> upper_bounds(4,M_PI);
+    upper_bounds[0] = M_PI/2;
+    const std::vector<double> lower_bounds(4,0.0);
+    opt.set_upper_bounds(upper_bounds);
+    opt.set_lower_bounds(lower_bounds);
+    opt.set_maxtime(600);
+    opt.set_ftol_abs(0.005);
+    std::vector<double> guess(4);
+    // guess[0] = M_PI/2;
+    // guess[1] = M_PI/2;
+    // guess[2] = M_PI/4;
+    // guess[3] = M_PI/2;
+    guess[0] = 0.542511;
+    guess[1] = 0.543133;
+    guess[2] = 2.31285;
+    guess[3] = 0.682252;
+    double max_conc = 0;
+    try {
+        nlopt::result result = opt.optimize(guess,max_conc);
+        std::cout << max_conc << " at (" << guess[0] << ", " << guess[1] << ", " << guess[2] << ", " << guess[3] << ")\n";
+    }
+    catch (std::runtime_error &e) {
+        std::cerr << "Optimization failed: " << e.what() << "\n";
+        std::cerr << "Best value before failure: " << max_conc << " at (" << guess[0] << ", " << guess[1] << ", " << guess[2] << ", " << guess[3] << ")\n";
+    }
+}
+
+void batch_qubits_qsums() {
+    const unsigned int max_time = 5000;
+    unsigned int interaction_pattern = 0;
+    const unsigned int qubits[8] = {2,3,4,5,6,7,8,9};
+    set_angles_pattern(interaction_pattern);
+    char prefix;
+    switch(interaction_pattern){
+        case 0:
+            prefix = 'r';
+            break;
+        case 1:
+            prefix = 'o';
+            break;
+        case 2:
+            prefix = 'b';
+            break;
+        case 3:
+            prefix = 'c';
+            break;
+    }
+    bool save_state = false;
+    bool calculate_qsums = true;
+    bool calculate_probabilities = true;
+    bool calculate_final_Qfuncs = false;
+    for (unsigned int n_qubits : qubits) {
+        if (n_qubits == 5 || n_qubits == 10) {
+            calculate_final_Qfuncs = true;
+        } else {
+            calculate_final_Qfuncs = false;
+        }
+        std::cout << n_qubits << std::endl;
+        const unsigned int qubitstate_size = 1 << n_qubits;
+        std::string seed_filename = "seed_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+        std::string Qsums_filename = "qsums_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+        std::string probs_filename = "probs_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+        std::string squared_Qfuncs_filename = "sqfuncs_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+        std::string output_filename = "state_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
+        seed_filename.insert(seed_filename.begin(),prefix);
+        Qsums_filename.insert(Qsums_filename.begin(),prefix);
+        probs_filename.insert(probs_filename.begin(),prefix);
+        output_filename.insert(output_filename.begin(),prefix);
+        general_multicqw(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,squared_Qfuncs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,calculate_final_Qfuncs,interaction_pattern);
+    }
 }
 
 int main() {
-    // const unsigned int n_qubits = 2;
-    // const unsigned int qubitstate_size = 1 << n_qubits;
-    // const unsigned int max_time = 10000;
-    // std::string seed_filename = "batch_instates/random_seed.txt";
-    // std::vector<unsigned int> interaction_seed(max_time);
-    // parse_interaction_seed(seed_filename,0,max_time,interaction_seed);
-    // std::string Qsums_filename = "seed_qsum.txt";
-    // std::vector<Eigen::VectorXcd> fin_state(D);
-    // evolve_seed_to_T(n_qubits,qubitstate_size,max_time,interaction_seed,fin_state);
-    // std::vector<Eigen::VectorXd> Qsums(D);
-    // calculate_sumofQ2(n_qubits,qubitstate_size,fin_state,max_time,Qsums);
-    // average_sumofQ2(Qsums);
-    // std::cout << "Writing average sums of Q^2" << std::endl;
-    // save_sums(Qsums[0],Qsums_filename);
-
-    batch_initial_states_multicqw();
-    
-    // const unsigned int qubits[2] = {9,10};
-    // const unsigned int max_time = 5000;
-    // const unsigned int interaction_pattern = 0;
-    // char prefix = 'r';
-    // bool save_state = false;
-    // bool calculate_qsums = true;
-    // bool calculate_probabilities = true;
-    // for (unsigned int n_qubits : qubits) {
-    //     std::cout << n_qubits << std::endl;
-    //     const unsigned int qubitstate_size = 1 << n_qubits;
-    //     std::string seed_filename = "seed_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
-    //     std::string Qsums_filename = "qsums_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
-    //     std::string probs_filename = "probs_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
-    //     std::string output_filename = "state_dim" + std::to_string(D) + "_q" + std::to_string(n_qubits) + ".txt";
-    //     seed_filename.insert(seed_filename.begin(),prefix);
-    //     Qsums_filename.insert(Qsums_filename.begin(),prefix);
-    //     probs_filename.insert(probs_filename.begin(),prefix);
-    //     output_filename.insert(output_filename.begin(),prefix);
-    //     generate_and_evolve_seed_toT(n_qubits,qubitstate_size,max_time,seed_filename,Qsums_filename,probs_filename,output_filename,save_state,calculate_qsums,calculate_probabilities,interaction_pattern);
-    // }
+    // optimize_state_concurrence();
+    // angle_renyi_multicqw();
+    batch_qubits_qsums();
+    // batch_coin_operator_multicqw();
+    // batch_initial_states_multicqw();
+    // optimize_angle_concurrence();
 
     return 0;
 }
+
+/*
+Ordered
+0.624426 at (0.659746, 1.81939, 2.30709, 3.02222)
+0.602134 at (0.542511, 0.543133, 2.31285, 0.682252)
+
+
+|0>
+0.488775 at (1.5708, 3.00255)
+|1>
+0.488773 at (1.5708, 1.84983)
+|0>_x
+0.626278 at (0.586342, 1.6015)
+|1>_x
+0.626258 at (0.575914, 1.60221)
+|0>_y
+0.626299 at (0.587033, 3.09554)
+|1>_y
+0.626299 at (0.587033, 3.09554)
+
+
+Random
+0.526521 at (1.56913, 0.0718192, 2.74202, 3.09294)
+|0>
+0.475008 at (1.5708, 0.0530242)
+|1>
+0.475006 at (1.5708, 2.41698)
+|0>_x
+0.474797 at (1.56875, 0.00690582)
+|1>_x
+0.474643 at (1.56598, 0.00915533)
+|0>_y
+0.474812 at (1.56876, 1.54844)
+|1>_y
+0.474664 at (1.56876, 1.62425)
+*/
