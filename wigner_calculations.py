@@ -4,7 +4,7 @@ from sympy.physics.wigner import wigner_d
 from multiprocessing import Pool
 import os
 
-D = 101
+D = 21
 alpha_res = 20
 beta_res = 20
 L = sp.Integer((D - 1) / 2) # Arbitrarily choosing only odd dimensions? Well, there are other reasons xd but still

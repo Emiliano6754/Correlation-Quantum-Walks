@@ -33,6 +33,7 @@ struct opt_params {
 };
 
 unsigned int D = 101;
+unsigned int start_skip = 1000;
 double w = 2*EIGEN_PI/D;
 const double sqrt2 = sqrt(2);
 const std::complex<double> im(0.0,1.0);
@@ -170,7 +171,7 @@ double steady_ensemble_concurrence(const unsigned int &n_qubits, const std::vect
     for (unsigned int m = 1; m < D; m++) {
         weighted_concurrences[0] += weighted_concurrences[m];
     }
-    return weighted_concurrences[0].mean();
+    return weighted_concurrences[0].tail(weighted_concurrences[0].size() - start_skip).mean();
 }
 
 void save_steady_concurrences(Eigen::VectorXd &steady_concurrences,const std::string &filename) {
@@ -744,7 +745,7 @@ void batch_initial_states_coins_multicqw(){
 void batch_initial_states_multicqw(){
     const unsigned int n_qubits = 2;
     const unsigned int qubitstate_size = 1 << n_qubits;
-    const unsigned int max_time = 5000;
+    const unsigned int max_time = 10000;
     unsigned int thetas_res = 100;
     unsigned int phis_res = 100;
     beta = M_PI/2;
@@ -904,7 +905,7 @@ void optimize_angle_concurrence() {
 void batch_qubits_qsums() {
     const unsigned int max_time = 5000;
     unsigned int interaction_pattern = 0;
-    const unsigned int qubits[8] = {2,3,4,5,6,7,8,9};
+    const unsigned int qubits[1] = {10};
     set_angles_pattern(interaction_pattern);
     char prefix;
     switch(interaction_pattern){

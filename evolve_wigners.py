@@ -4,8 +4,8 @@ from sympy.physics.wigner import wigner_d
 from multiprocessing import Pool
 import os
 
-D = 17
-interaction_pattern = "r"
+D = 21
+interaction_pattern = "o"
 concurrences_savepath = "/data/wigners/"
 concurrences_filename = interaction_pattern + "concs_dim" + str(D) + ".npy"
 
